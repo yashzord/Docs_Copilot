@@ -1,18 +1,35 @@
-# Workspace root. No [project] table on purpose: this is a "virtual" root that owns
-# the single uv.lock and the shared tool config. It is not itself a package.
-# Members are listed by name, not by glob, so a stray directory without a
-# pyproject.toml cannot break the workspace. Add a name when the package appears.
-# https://docs.astral.sh/uv/concepts/projects/workspaces/
-[tool.uv.workspace]
-members = ["api", "worker", "core", "agents", "mcp_servers", "research_agent", "evals"]
+# The backend: one Python project. Code in app/, tests in tests/.
+# No [build-system] table: this is an application we run, not a library we
+# publish, so uv installs its dependencies but never builds the project itself.
+# https://docs.astral.sh/uv/concepts/projects/config/#build-systems
+[project]
+name = "docs-copilot-backend"
+version = "0.1.0"
+description = "FastAPI backend: streams a Bedrock chat answer over Server-Sent Events"
+requires-python = ">=3.12"
+dependencies = [
+  # 0.135 is the first release with fastapi.sse (EventSourceResponse).
+  # https://fastapi.tiangolo.com/tutorial/server-sent-events/
+  "fastapi>=0.141.1",
+  # [standard] adds uvloop, httptools, and watchfiles (needed for --reload).
+  "uvicorn[standard]>=0.52.4",
+  "boto3>=1.43.91",
+  "pydantic-settings>=2.15.0",
+]
 
-# PEP 735 dependency groups. "dev" is synced by default by `uv sync`.
+# PEP 735 dependency groups. "dev" is installed by `uv sync`, skipped by `uv sync --no-dev`.
 # https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-groups
 [dependency-groups]
 dev = [
   "ruff>=0.12",
   "mypy>=1.16",
   "pytest>=8",
+  # FastAPI's TestClient (from Starlette) needs an HTTP client library. httpx is
+  # unmaintained and deprecated there; httpx2 is its maintained fork.
+  # https://starlette.dev/testclient/
+  "httpx2>=2.12.0",
+  # Type descriptions of boto3's dicts, for mypy only. Never imported at runtime.
+  "boto3-stubs[bedrock-runtime]>=1.43.91",
 ]
 
 [tool.ruff]
@@ -26,9 +43,17 @@ select = ["E", "F", "I", "B", "UP", "N", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 # S101: `assert` is the point of a test.
-"**/tests/**" = ["S101"]
+"tests/**" = ["S101"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 warn_unreachable = true
+# Teaches mypy how pydantic builds __init__ from fields.
+# https://pydantic.dev/docs/validation/latest/integrations/dev-tools/mypy/
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+# Lets tests `import app` when pytest runs from backend/.
+# https://docs.pytest.org/en/stable/reference/reference.html#confval-pythonpath
+pythonpath = ["."]

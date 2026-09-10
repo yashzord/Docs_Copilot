@@ -3,8 +3,8 @@
 Upload documents, ask questions, get answers with citations, and hand tasks to
 a team of AI agents. Built step by step as a learning project.
 
-New here? Start with `docs/learning/D1.md`. It explains every file in plain
-words with pictures.
+New here? Start with `docs/learning/README.md`. Plain words, pictures, and
+a reading order.
 
 ---
 
@@ -61,7 +61,7 @@ backend/             Python workspace root: pyproject.toml, uv.lock, .python-ver
   mcp_servers/       tools the agents can call (FastMCP)        D5
   research_agent/    web + code agent, runs as its own server   D6
 infra/               terraform (D2+), kind manifests (D8)
-docs/learning/       one lesson per deliverable
+docs/learning/       topic tracks + one build log per deliverable
 ```
 
 ---
@@ -99,7 +99,7 @@ Decided once, with numbers checked. Not reopened without a reason.
 | Terraform from D2 | from D8 | AWS resources appear from D2, no point clicking them by hand first |
 | kind manifests last, learning only | none | nothing deploys to Kubernetes, EKS is banned by budget |
 
-Budget: about $200 in credits, alarm at $25 a month. No EKS. No OpenSearch
+Budget: about $200 in credits, alarm at $30 a month. No EKS. No OpenSearch
 Serverless.
 
 ---
@@ -120,6 +120,7 @@ tests with botocore Stubber. Commits use Conventional Commits (`feat:`,
 
 ## 7. Learning docs
 
-One file per deliverable in `docs/learning/`. Each one: what was built, why,
-every new word explained, a picture where a picture helps, and a
-check-yourself list at the end.
+`docs/learning/`: four topic tracks (`ai.md`, `aws.md`, `tooling.md`,
+`web.md`) that grow one section per topic, a `glossary.md`, and one build
+log per deliverable (`D1.md` to `D8.md`) that links into the tracks. Written
+for a beginner, pictures over paragraphs, self-check at the end of each.

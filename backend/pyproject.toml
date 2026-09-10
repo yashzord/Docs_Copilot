@@ -1,0 +1,34 @@
+# Workspace root. No [project] table on purpose: this is a "virtual" root that owns
+# the single uv.lock and the shared tool config. It is not itself a package.
+# Members are listed by name, not by glob, so a stray directory without a
+# pyproject.toml cannot break the workspace. Add a name when the package appears.
+# https://docs.astral.sh/uv/concepts/projects/workspaces/
+[tool.uv.workspace]
+members = ["api", "worker", "core", "agents", "mcp_servers", "research_agent", "evals"]
+
+# PEP 735 dependency groups. "dev" is synced by default by `uv sync`.
+# https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-groups
+[dependency-groups]
+dev = [
+  "ruff>=0.12",
+  "mypy>=1.16",
+  "pytest>=8",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes. I: import order. B: bugbear. UP: modernize syntax.
+# N: naming. S: bandit security. SIM: simplify. RUF: ruff-specific.
+select = ["E", "F", "I", "B", "UP", "N", "S", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: `assert` is the point of a test.
+"**/tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true

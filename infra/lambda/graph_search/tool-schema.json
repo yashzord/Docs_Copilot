@@ -1,0 +1,16 @@
+[
+  {
+    "name": "search_graph",
+    "description": "Search the knowledge graph built from the user's documents. Use it for questions about how things are connected or related across documents, for example how one service, decision or concept relates to another.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "A short search query naming the things to connect"
+        }
+      },
+      "required": ["query"]
+    }
+  }
+]

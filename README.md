@@ -32,11 +32,9 @@ agents, AWS, containers, and scaling, one working piece at a time.
 |---|---|---|
 | Assistant | the AgentCore Harness: one managed agent that picks the right tool per question | D2 |
 | Documents tool | the managed Knowledge Base, exposed through Gateway as `Retrieve` | D2 |
-| Graph tool | the GraphRAG Knowledge Base on Neptune, behind a Lambda on the Gateway | D4 |
-| Browser tool | AgentCore Browser: the agent reads live web pages | D5 |
-| Code tool | AgentCore Code Interpreter, tried for one afternoon; kept only if it earns its place | D5 |
-| Research agent | a Strands agent on AgentCore Runtime, called through the Gateway | D6 |
-| Action tool | saves notes, opens GitHub issues with the user's own login (Identity) | D7 |
+| Browser tool | AgentCore Browser: the agent reads live web pages | D3 |
+| Research agent | a Strands agent on AgentCore Runtime, called through the Gateway | D4 |
+| Graph tool | the GraphRAG Knowledge Base on Neptune, behind the Gateway | D5 |
 
 ### How agents use tools
 
@@ -60,20 +58,20 @@ harness --MCP--> gateway --> research agent   "research this and report back"
 
 A Bedrock Knowledge Base does retrieval: it parses and chunks each
 document, turns chunks into vectors, and answers a question with hybrid
-search (meaning plus exact words) followed by a reranker (D2, D3). A
+search (meaning plus exact words) followed by a reranker (D2). A
 second knowledge base holds a knowledge graph of entities and
-relationships for "how does X relate to Y" questions (D4). A supervisor
-agent decides which one a question needs (D5). An eval set of 30+
+relationships for "how does X relate to Y" questions (D5). The agent
+picks which one a question needs, by choosing a tool. An eval set of 30+
 questions, scored by Bedrock's built-in RAG evaluation, measures every
-change (D3). The learning docs explain what happens inside each of these,
+change (later). The learning docs explain what happens inside each of these,
 not just how to switch them on.
 
 ### Production-shaped, on purpose
 
-- **Multi-tenant:** each customer's data is walled off at every layer.
+- **Single user, on purpose:** no login. Multi-tenancy was dropped to finish the product end to end; a fixed tenant stub (`dev`) remains.
 - **Streaming:** answers appear word by word, end to end.
-- **Checked:** typed, linted, tested, and CI blocks a merge if answer quality drops.
-- **Costed:** tokens and cost tracked per request per tenant.
+- **Checked:** typed, linted, tested in CI; an eval set may score answer quality later.
+- **Costed:** tokens and cost tracked per answer.
 
 ### Ground rules
 
@@ -91,7 +89,7 @@ flowchart LR
     B --> H[AgentCore Harness<br/>the agent: model + tools + memory]
     H --> G[AgentCore Gateway<br/>tools over MCP]
     G --> K[Knowledge Bases<br/>documents + knowledge graph]
-    H --> T[Code Interpreter<br/>Browser]
+    H --> T[Browser<br/>live web pages]
     H --> M[(AgentCore Memory<br/>chat history + facts)]
 ```
 
@@ -108,7 +106,7 @@ uv sync                     1. install everything
 uv run ruff check .         2. lint (style and bug check)
 uv run mypy .               3. typecheck
 uv run pytest               4. tests
-uv run uvicorn app.main:app --reload    start the API on http://localhost:8000
+uv run uvicorn app.main:app --reload --port 8001    start the API on http://localhost:8001
 
 # frontend (first time: cp .env.example .env.local, set API_URL to the backend's port)
 cd frontend
@@ -126,11 +124,12 @@ npm test                    stream parser tests
 
 ```
 frontend/            web page (Next.js, TypeScript, Tailwind)
-  app/               pages and the /api/chat proxy route                D1
-  components/        UI pieces: the chat window                         D1
-  lib/               plain helpers: the stream parser + its tests       D1
+  app/               the page, and one proxy route /api/[...path]       D1, D2
+  components/        Chat (answers, sources) and Sidebar (chats, docs)  D1, D2
+  lib/               stream parser, citation splitter + their tests    D1, D2
 backend/             one Python project: pyproject.toml, uv.lock, .env
-  app/               the API server (FastAPI); later the worker too    D1+
+  app/               the API server (FastAPI): upload, chat relay, sessions   D1+
+  prompts/           the harness system prompt (pasted into the console)     D2
   tests/             pytest tests                                       D1+
 infra/               terraform (D2+), kind manifests (D8)
 docs/learning/       topic tracks + one build log per deliverable
@@ -142,17 +141,17 @@ or its own container.
 
 ---
 
-## 4. The 8 deliverables
+## 4. Deliverables
 
 ```
-[ ] D1  skeleton + streaming chat with Bedrock
-[ ] D2  upload (md, pdf, URLs) -> S3 -> managed Knowledge Base; Gateway exposes it as a tool; Harness answers with citations
-[ ] D3  login with Cognito through AgentCore Identity; real tenants replace the header stub
-[ ] D4  GraphRAG Knowledge Base on Neptune Analytics (created when needed, deleted after) behind the Gateway; chat sidebar from Memory
-[ ] D5  Browser tool on the Harness (Code Interpreter as a trial); long-term memory (facts, preferences)
-[ ] D6  research agent: Strands on AgentCore Runtime, called through the Gateway
-[ ] D7  Observability, Evaluations (RAG + agent), Policy on tool calls, Guardrails, cost per tenant
-[ ] D8  Terraform for the non-AgentCore pieces, CI eval gate, k6 load test, kind manifests (learning only)
+[x] D1  skeleton + streaming chat with Bedrock
+[x] D2  upload -> S3 -> managed Knowledge Base; Gateway exposes it as a tool; Harness answers with citations; sidebar from Memory
+[x] D3  Browser tool on the Harness; long-term memory (facts, preferences)
+[ ] D4  research agent: Strands on AgentCore Runtime, called through the Gateway
+[ ] D5  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (one sitting: create, test, delete)
+
+then   stop and review; reverse-learning pass: trace one question end to end, break things on purpose
+later  maybe: Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
 ```
 
 ---
@@ -168,17 +167,18 @@ Decided once, with numbers checked. Not reopened without a reason.
 | Bedrock GraphRAG on Neptune Analytics, created for the demo and deleted after | Neo4j + our own extraction | AWS-native and 30 minutes to set up; but $3.51 an hour while running, so never left on |
 | No NAT Gateway | private subnets + NAT | $32 a month for nothing we need |
 | No Redis | Redis for rate limits | one server process until D8, a counter in memory is enough |
-| One Knowledge Base, `tenant_id` metadata filter on every query | one knowledge base per tenant | same wall, one thing to manage |
+| No login, single user | Cognito + per-tenant search filter | finish the product end to end first; the tenant label code stays as a stub |
 | Knowledge Base's managed embedding model | Titan or Cohere chosen by us | the built-in reranker only works with the managed embeddings |
 | Bedrock Converse API | Anthropic SDK | one request shape for every model on Bedrock |
 | AWS is deploy, demo, destroy | always-on | one small Fargate task is about $9 a month, four is $36 |
 | AgentCore Harness is the assistant | LangGraph supervisor + specialist agents | the loop, tool calls, memory and tracing are configuration; a supervisor was over-engineering at this scale |
+| Mistral Large 3 drives the agent | Llama 4 Maverick, gpt-oss-120b | Llama 4 cannot use tools while streaming; gpt-oss cannot drive the browser; Mistral was the only one decent at both (ai.md 2.7, 2.8) |
 | Strands for any agent code | LangGraph | the Harness is built on Strands and exports to it; every AgentCore integration is native |
 | AgentCore Gateway is the MCP server | FastMCP servers | Knowledge Base, Lambda and other agents become MCP tools with auth and policy in one place |
 | AgentCore Memory for chat history | Postgres in Docker | sessions and messages per user, long-term facts for free; no database to run |
 | No queue or worker for now | SQS + worker | the Knowledge Base's ingestion job already runs in the background |
 | Bedrock RAG evaluation for the scorecard | RAGAS | a judge model built in, no library; RAGAS is the fallback |
-| Cognito and Terraform after the demo | in D2 | neither is visible in a demo; AWS resources are made in the console for now |
+| Terraform, CI eval gate, k6, kind after the reverse-learning pass | during the build | product first; AWS resources are made in the console for now |
 | kind manifests last, learning only | none | nothing deploys to Kubernetes, EKS is banned by budget |
 | One flat backend project (`backend/app`) | uv workspace + `src` layout | one package today; split only when a part needs its own dependencies or container |
 
@@ -192,7 +192,7 @@ only, not the old 12-month free services. No EKS. No OpenSearch Serverless.
 1. Hyphens only, never em dashes, in any file.
 2. Every non-obvious library call gets a one-line `# <docs url>` comment.
 3. A deliberate shortcut gets a `# ponytail:` comment naming its limit and the upgrade path.
-4. `tenant_id` comes from the login token (D3) and is enforced at the API and in every Knowledge Base query. Never trust the client for it.
+4. No login: `tenant_id` is a fixed stub (`dev`) set by the Next.js proxy. It is still validated at the API because it becomes the Memory actor id.
 5. No secrets in git. `.env` is ignored, `.env.example` is committed.
 
 Also: tests cover the happy path and the failure path. Bedrock is faked in
@@ -206,5 +206,5 @@ Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 `docs/learning/`: four topic tracks (`ai.md`, `aws.md`, `tooling.md`,
 `web.md`) that grow one section per topic, a `glossary.md`, and one build
-log per deliverable (`D1.md` to `D8.md`) that links into the tracks. Written
+log per deliverable (`D1.md`, `D2.md`, ...) that links into the tracks. Written
 for a beginner, pictures over paragraphs, self-check at the end of each.

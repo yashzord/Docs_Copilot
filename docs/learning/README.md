@@ -34,3 +34,7 @@ the project moves. If something is wrong or unclear, fix it in place.
 6. `web.md` sections 8 to 11 (Next.js, the proxy, reading a stream)
 7. `tooling.md` sections 9 and 10 (npm, Node's test runner)
 8. `D1.md` (the build log that ties it together)
+9. `ai.md` sections 3 to 6 (RAG, what happens inside it, GraphRAG, agents)
+10. `aws.md` sections 6, 7 and 10 (S3, Knowledge Bases, AgentCore)
+11. `ai.md` 2.7 (why the agent's model changed)
+12. `D2.md` (documents, the agent, citations)

@@ -101,6 +101,63 @@ Profile name and IAM username do not need to match.
 **Rules:** never paste keys into chat, git, or screenshots. If one leaks,
 delete it in IAM and make a new one. One minute.
 
+### 2.4a Inline vs managed policies
+
+A policy can live in two places:
+
+```
+inline policy     written directly on one user or role. All inline policies on a
+                  user together may be at most 2,048 bytes.
+managed policy    a separate object with its own name. Up to 6,144 bytes, attachable
+                  to many users and roles. AWS ships some ("AWS managed", e.g.
+                  BedrockAgentCoreFullAccess); you can make your own ("customer managed").
+```
+
+We hit the 2,048-byte wall on 2026-09-10: the third inline policy was
+refused with "Maximum policy size of 2048 bytes exceeded". The fix was to
+create it as a customer managed policy and attach it, which is the better
+habit anyway: one definition, reused wherever it is needed.
+
+The dev user now carries four:
+
+| Policy | Kind | Grants |
+|---|---|---|
+| `bedrock-dev` | inline | invoke models, list them, read the budget |
+| `kb-dev` | inline | Knowledge Base use, one S3 bucket |
+| `BedrockAgentCoreFullAccess` | AWS managed | everything in AgentCore |
+| `agentcore-setup` | customer managed | create `AgentCore*` roles and stacks, read logs |
+
+### 2.4b Reading a permission error
+
+Every AWS denial names the exact missing action and the exact resource:
+
+```
+User: ...user/yashubitra is not authorized to perform: iam:CreatePolicy
+on resource: policy AmazonBedrockCloudWatchPolicyForKnowledgeBase_mq0oz
+```
+
+That line is the whole diagnosis: add `iam:CreatePolicy` on policies named
+like that, nothing more. Three such walls appeared while creating the
+Knowledge Base on 2026-09-10 (a role name pattern, a policy name pattern,
+then `bedrock:CreateKnowledgeBase`). Each was fixed by reading the line.
+
+After the third, the AWS managed `AmazonBedrockFullAccess` policy was
+attached instead of adding actions one by one. The tradeoff, written down:
+the dev key can now do anything in Bedrock (worst case, a model bill the
+$30 alarm catches), in exchange for no more setup walls in that service.
+
+Then the decision was made to stop: on a sandbox account that one person
+controls, the dev user got `AdministratorAccess`, the same power as root
+minus account closure and billing changes. What that trades away: a leaked
+laptop key is now the whole account, not just a model bill. What it buys:
+no more setup walls. The least-privilege policies stay in `infra/iam/` as
+the shape a shared account would use.
+
+Proof the earlier fix worked: the bucket checks that were denied minutes earlier
+(`s3:GetBucketLocation` and friends) now answer. What still gets denied:
+the user reading its own policy list (`iam:ListAttachedUserPolicies`),
+because nothing grants it. That is fine; the console shows it.
+
 ### 2.5 MFA
 
 A phone code on top of the password. On for root, no exceptions.
@@ -304,6 +361,27 @@ Things that matter for us:
 - **Cost:** about $0.023 per GB per month, plus fractions of a cent per request. Our corpus is megabytes.
 - **Why keep files here at all:** citations link back to the original; the KB can be rebuilt from the bucket at any time; the KB reads *from* S3, it does not accept uploads directly.
 
+### 6.1 Every option on the "Create bucket" form, and what we picked
+
+Created 2026-09-10 as `docs-copilot-901708383582`.
+
+| Option | Choices | We picked | Why |
+|---|---|---|---|
+| Bucket type | General purpose / Directory | General purpose | Directory buckets are a special low-latency type in one availability zone. The Knowledge Base only supports general purpose |
+| Bucket namespace | Global / Account Regional | Global | names in the global namespace must be unique across all of AWS (hence the account id in ours). The newer account-regional kind has a different address format, and the Knowledge Base connector and our IAM policies use the classic `arn:aws:s3:::name` form |
+| Object Ownership | ACLs disabled / ACLs enabled | ACLs disabled | ACLs are the old per-object permission lists. Disabled means "only IAM policies decide access", one system instead of two |
+| Block all public access | on / off | on | nothing in this bucket is ever meant to be reachable from the internet |
+| Bucket Versioning | Disable / Enable | Disable | versioning keeps every old copy of every object (protects against accidental overwrites, costs storage). Re-uploading a document is fine for us |
+| Tags | optional | none | labels for cost reports. One project, one account: nothing to separate |
+| Default encryption | SSE-S3 / SSE-KMS / DSSE-KMS | SSE-S3 | every object is encrypted at rest either way. SSE-S3 uses keys AWS manages, free. KMS uses a key you manage and audit, with a per-request fee |
+| Bucket Key | Enable / Disable | Enable (default) | only matters for KMS; it caches the key to cut KMS calls. Harmless with SSE-S3 |
+
+**Denied by default, proven:** right after creating the bucket, the dev
+user could not even ask which region it was in (`AccessDenied` on
+`s3:GetBucketLocation`). Creating something as root does not grant the
+IAM user anything. The `kb-dev` policy (`infra/iam/kb-dev.json`) adds
+exactly the actions needed, on exactly this bucket.
+
 ---
 
 ## 7. Bedrock Knowledge Bases
@@ -327,6 +405,28 @@ from `ai.md` section 4 and answers `Retrieve` calls with the best chunks.
 
 So we run **two**: a managed KB for documents (D2), and a small
 customer-managed KB for the graph (D4).
+
+### 7.1a Every option on the "Create Managed Knowledge Base" form
+
+Created 2026-09-10 as `docs-copilot-kb` by the IAM user (a root user is
+not allowed to create one).
+
+| Section | Option | We picked | What it means |
+|---|---|---|---|
+| KB details | Embeddings model | Managed | AWS runs the embedding model (ai.md 4.3) at no extra cost. Required for the free built-in reranker. The alternative lets you pick Titan or Cohere and pay per token |
+| | IAM permissions | Create and use a new service role | a **service role** is the identity the Knowledge Base itself uses to read your bucket and call models. The console wrote its permissions |
+| | KMS key | default (AWS owned) | the vector store is encrypted either way; your own key only matters when you must control and audit the key |
+| Data source | Type | Amazon S3 | where documents come from. Web Crawler is the one for URLs, added later as a second data source |
+| | Location / S3 URI | this account, `s3://docs-copilot-901708383582` | the bucket it reads on every sync |
+| | Crawl ACLs | Disable | ACL crawling copies per-document permissions from sources like SharePoint. S3 has none; our tenant wall is the metadata file |
+| | Parsing strategy | Managed parser | PDF, Word, HTML to text (ai.md 4.1), images included |
+| | Chunking strategy | Default | ~300-token chunks at sentence boundaries (ai.md 4.2). **Cannot be changed later**; comparing strategies means a second data source |
+| | Sync schedule | On-demand | a sync (ingestion job) runs only when asked. Our API asks after each upload |
+| | Prefix and file filters | none | would limit syncing to certain folders or extensions |
+| | Log deliveries | none | sync logs to CloudWatch; useful when a file fails to index, not now |
+| Advanced | Content indexing | Default (text) | advanced indexing also reads images, audio, video, at extra cost per file |
+| | Max file size | default | |
+| | Document deletion safeguard | Off | when on, a sync that would delete many chunks skips deletion, to survive an accidentally emptied bucket. Small corpus: we want deletions to apply |
 
 ### 7.2 The pieces
 
@@ -376,6 +476,24 @@ We then build the prompt ourselves and stream the answer with Llama
 through the Converse API from D1. The KB also offers
 `RetrieveAndGenerate`, which writes the answer for you; we skip it because
 our agents need the raw chunks, and generation is already ours.
+
+### 7.4a Verified end to end, before any code
+
+2026-09-10, by hand from the CLI:
+
+```
+upload      tenants/dev/README.md  +  README.md.metadata.json {tenant_id: dev}
+sync        StartIngestionJob -> 2.5 minutes -> COMPLETE, 1 document indexed, 0 failed
+retrieve    via the gateway tool docs___Retrieve("why was Neptune Analytics dropped?")
+            -> 5 passages, best score 0.63, each with the S3 source URL and tenant_id=dev
+            -> passage [2] is the README's decision table with the Neptune row
+tenant wall Retrieve with filter tenant_id=dev   -> 3 passages
+            Retrieve with filter tenant_id=other -> 0 passages
+```
+
+So the whole path (bucket, metadata, sync, index, hybrid search, rerank,
+gateway, filter) works with zero lines of our code. What our code adds is
+the upload endpoint, the sync trigger, and the UI.
 
 ### 7.5 Permissions our user needs
 
@@ -482,6 +600,40 @@ conversation.
 Not possible in a Harness: a workflow with explicit steps, or several
 agents coordinating. For that, code on Runtime (D6).
 
+### 10.2a Every option on the "Create Harness" form
+
+Created 2026-09-11 as `docs_copilot_assistant` with **Advanced create**
+(Quick create asks only for a name and uses defaults). The name cannot be
+changed later and allows letters, digits and underscores, no dashes.
+
+| Section | Option | We picked | What it means |
+|---|---|---|---|
+| Model | Model source | Bedrock | the other choices call LiteLLM, OpenAI or Gemini directly with your own keys |
+| | API source | Bedrock (Converse) | Mantle is the OpenAI-style API. Converse is needed for Guardrails later |
+| | Model | gpt-oss-120b | first Llama 4 Maverick, which failed: no tool use while streaming (ai.md 2.7) |
+| | System prompt | `backend/prompts/assistant.md` | the agent's standing instructions: search first, cite `[1]`, admit gaps |
+| | Parameters | empty | temperature and max tokens stay at the model's defaults |
+| Memory | Enable, create new (managed by Harness) | on | the harness creates an AgentCore Memory and saves every message to it; takes 3 to 5 minutes |
+| | Strategies | Summarization | long-term memory: a running summary per conversation. Semantic (facts) and user preference come in D5 |
+| | Short-term expiration | 30 days | raw messages are deleted after this |
+| Tools | Gateway | `docs-copilot-gw`, outbound auth IAM | the agent's tools come from the gateway over MCP |
+| | Browser, Code interpreter | off | D5 |
+| | Remote MCP server, Custom functions | none | tools hosted elsewhere, or run by our own app |
+| Skills | | none | bundles of files and scripts the agent can use |
+| Advanced | Filesystem | none | persistent storage between sessions |
+| | Network | Public | VPC only when the agent must reach private resources |
+| | Custom environment | empty | our own container image, for extra software |
+| | Idle session timeout | 15 minutes | a quiet session's machine is stopped, so it stops costing |
+| | Max lifetime | 1 hour | the longest a session's machine may live |
+| | Truncation | Sliding window, 30 messages | only the last 30 messages go to the model each turn |
+| | Allowed tools | only the gateway's tools | removes the built-in shell and file tools, which a document assistant must not have |
+| | Max iterations / timeout / max tokens | 10 / 5 min / 2048 | caps on one answer: loop turns, time, and length |
+| Inbound Auth | | IAM | who may call the harness: any AWS identity with permission. JWT login comes in D3 |
+| Permissions | | create default role | the harness's own identity. It gets model access, the gateway, its memory, and (by default) Browser, Code Interpreter and file system rights we do not use yet |
+
+Verified after creation (CLI `get-harness`): model, prompt, the gateway tool,
+allowed tools `@<gateway>`, memory `docs_copilot_assistant-6aIbceHbw1`.
+
 ### 10.3 Gateway
 
 An MCP server AWS runs for you. You add **targets**; each becomes tools:
@@ -512,6 +664,50 @@ multi-tenancy: the filter is per target, not per caller. So the tenant
 wall in D3 will be either one target per tenant, or the Knowledge Base's
 own access-control mode with a per-user `userContext`. Decided in D3, not
 now.
+
+### 10.3a Every option on the "Create gateway" form
+
+Created 2026-09-10 as `docs-copilot-gw`. IDs live in `backend/.env.example`.
+
+| Step | Option | We picked | What it means |
+|---|---|---|---|
+| 1 details | Semantic search | off | lets an agent search a big tool catalog by meaning, billed per search. We have three tools |
+| | Exception level debugging | off | verbose AWS-side logs |
+| | Response streaming | on | a tool may stream partial results (the KB's agentic tool does) |
+| | Sessions | off | stateful MCP sessions; our calls are one-shot |
+| | MCP version | 2026-07-28 (and 2025-11-25) | the protocol versions the gateway speaks; fixed at creation. A client names one in the `MCP-Protocol-Version` header. Found while testing: 2026-07-28 also requires a `_meta` field in every call; 2025-11-25 does not. The harness handles this itself; it matters only for hand-made calls |
+| | Interceptor Lambdas | none | your own code to rewrite requests or responses |
+| | IAM permissions | create default role | the gateway's **service role**, used to reach targets |
+| | Policy engine | none | rules on tool calls, D7 |
+| | WAF | off | a web firewall, about $5 a month; our gateway needs AWS credentials to call anyway |
+| 2 inbound identity | Inbound auth | AWS IAM | who may call: any AWS identity with `InvokeGateway`. JWT (a login token) comes in D3. "No authorization" would make it public. "Authenticate only" checks the signature but not permissions |
+| 3 target | Protocol | MCP target | the other kinds: inference (call a model), agent (front another agent, D6), custom (raw HTTP) |
+| | Name | `docs` | becomes the tool prefix: `docs___Retrieve` |
+| | Passthrough | off (aggregated) | the gateway is the MCP server and merges all targets into one tool list; passthrough would make it a proxy to one server |
+| | Target type | Connectors, Knowledge Bases | pre-built target for a managed KB |
+| | Retrieval type | Standard | exposes `Retrieve` (one hybrid search per call). Agentic would expose `AgenticRetrieveStream`, multi-step planning at $4 per 1,000 calls, overlapping the harness |
+| | Source chunks | 5 | passages returned per search; tuned by the eval in D7 |
+| | Manual filters | none | a fixed metadata filter, e.g. `tenant_id = dev`, per target. The multi-tenant question for D3 |
+| | Model generated filters | off | a model guesses filters from the question, ~2,000 extra tokens per call |
+| | Guardrail | none | D7 |
+| | Reranking | Default | the free managed reranker (ai.md 4.6). Console default is off; ours is on |
+| | Agent overrides | none | would let the model change chunk count or pass a user context |
+| | Outbound auth | IAM role | how the gateway authenticates to the KB; the only option for this connector |
+
+### 10.3b Verified: the gateway as an MCP server
+
+Called by hand on 2026-09-10 with a signed request (curl can sign with
+SigV4 given the access key), before any of our code existed:
+
+```
+tools/list  ->  one tool: docs___Retrieve
+                argument: retrievalQuery.text (string)
+tools/call docs___Retrieve {"retrievalQuery": {"text": "vacation days"}}
+            ->  {"retrievalResults": []}        (the bucket was still empty)
+```
+
+That is the whole contract the harness will use. The tool name is the
+target name, three underscores, the tool.
 
 ### 10.4 Memory
 

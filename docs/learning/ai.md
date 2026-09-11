@@ -158,6 +158,76 @@ system is still being built.
 The model ID is one line in `.env`. Changing your mind costs 10 seconds.
 That is why it is config, not code.
 
+### 2.7 D2 change: the agent needs streaming tool use
+
+The harness failed on its first question with: `This model doesn't support
+tool use in streaming mode.` Bedrock has two chat calls, `Converse` (whole
+answer at once) and `ConverseStream` (piece by piece). The harness always
+streams. Llama 4 on Bedrock supports tools only with `Converse`. The model
+card says "tool calling: yes" and does not mention this, so the only proof
+is a real call.
+
+Tested 2026-09-11: one streamed tool call, then a real KB search, then the
+answer, for each cheap model. Two questions: one the README answers, one it
+does not (vacation days).
+
+| Model | $ in / out per 1M (us-west-2) | Streams tools | Right answer | Admits gap |
+|---|---|---|---|---|
+| Llama 4 Maverick / Scout | 0.24 / 0.97, 0.17 / 0.66 | no | - | - |
+| **gpt-oss-120b** | **0.15 / 0.60** | yes | yes, cited | yes |
+| Mistral Large 3 | 0.50 / 1.50 | yes | yes, cleanest | yes |
+| Nova Lite | 0.06 / 0.24 | yes | yes, cited | yes |
+| GLM 4.7 Flash | 0.07 / 0.40 | yes | yes, cited | yes |
+| Nova 2 Lite | 0.30 / 2.50 | yes | yes, but pastes whole excerpts | yes |
+| Qwen3 235B / 32B | 0.22 / 0.88, 0.15 / 0.60 | yes | partly wrong | yes |
+| Ministral 14B | 0.20 / 0.20 | yes | invented a detail | yes |
+| DeepSeek V3.2 | 0.62 / 1.85 | yes, but wrong argument shape | not tested | - |
+| Claude Haiku 4.5 | 1 / 5 | blocked until Anthropic's first-use form is submitted in the Bedrock console | - | - |
+
+```
+D2 agent model: gpt-oss-120b (openai.gpt-oss-120b-1:0)
+Because: cheaper than Maverick, streams tool calls, answered correctly with
+a citation, and said so when the documents did not cover the question.
+```
+
+Lesson: check "tool use **while streaming**" for any model an agent will
+drive.
+
+### 2.8 D3 change: the browser needs a stronger tool user
+
+Adding the Browser tool (D3) exposed a second limit. A search tool takes one
+argument (a query). The browser takes a sequence of actions, each with its
+own inputs: open a session, navigate, read the text, close. gpt-oss-120b
+navigated before opening a session, retried, then printed its next action
+as text instead of calling the tool.
+
+Tested 2026-09-11 through the real harness (model passed as an invoke-time
+override), three tasks each, **a fresh actor id per run** so long-term
+memory could not interfere:
+
+| Model | $ in / out per 1M | Document question | Not in documents | Web page |
+|---|---|---|---|---|
+| **Mistral Large 3** | **0.50 / 1.50** | searched, correct, cited | said so | worked |
+| gpt-oss-120b | 0.15 / 0.60 | correct | said so | failed to drive the browser |
+| Qwen3 235B | 0.22 / 0.88 | did not search, said "no info" | said so | worked, vague |
+| GLM 4.7 Flash | 0.07 / 0.40 | misread the table, leaked "I'll search..." | said so | worked, read 400k tokens |
+| Nova Lite | 0.06 / 0.24 | leaked `<thinking>`, never searched | failed | never used the browser |
+
+```
+D3 agent model: Mistral Large 3 (mistral.mistral-large-3-675b-instruct)
+Because: the only model decent at both documents and the browser.
+Cost: about 1 cent per document question, 2 to 8 cents per web page
+(a page's text is 28k to 150k input tokens).
+```
+
+Two lessons:
+1. A model that handles one simple tool can still fail a multi-step tool.
+   Test with the hardest tool the agent will have.
+2. Long-term memory is part of the prompt. A first round of this test reused
+   one actor id, and facts memory had learned from earlier test chats
+   ("interested in AgentCore") pulled models toward the wrong tool. Test
+   with a clean actor.
+
 ---
 
 ## 3. RAG: the idea

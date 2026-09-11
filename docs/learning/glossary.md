@@ -20,6 +20,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | bucket | a top-level container of files in S3, with a globally unique name | aws |
 | budget | email alarm at a spending threshold, not a cap | aws |
 | build system | the tool that turns code into an installable package. Our backend has none: it is run, not installed | tooling |
+| catch-all route | a Next.js folder named `[...path]` that answers every URL below it; `params.path` is the list of parts | web |
 | chunk | one piece of a document, a paragraph or so, the unit that gets searched and cited | ai |
 | chunking | cutting a document into chunks; strategies: default, fixed-size with overlap, semantic, hierarchical | ai |
 | CI | continuous integration: a robot runs lint, typecheck, tests on every push | tooling |
@@ -28,12 +29,15 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | ClientError | boto3 error: AWS answered, and the answer was an error | aws |
 | commit | one saved snapshot of the repo | tooling |
 | concurrency | many tasks in progress at once, taking turns. Threads waiting on the network give us this | web |
+| content block | one piece of a model message (text, reasoning, a tool call, a tool result), streamed as start, deltas, stop | ai |
 | context window | max tokens a model can hold in one call, everything included | ai |
 | Converse API | Bedrock's chat API with one request shape for every model | aws |
+| ConverseStream | the streaming form of Bedrock's Converse API; an agent needs a model that supports tool use in it | aws |
 | CORS | the browser's rules for calling a different address than the page came from | web |
 | cosine similarity | how close two vectors point; 1.0 same direction, 0 unrelated | ai |
 | cross-encoder | a model that reads question and chunk together; what a reranker is | ai |
 | data source | where a Knowledge Base gets documents: an S3 bucket, a web crawl | aws |
+| data source sync | same as an ingestion job: the Knowledge Base re-reads the bucket; one at a time per data source | aws |
 | dependency | a package our code needs to run | tooling |
 | dependency (FastAPI) | a function FastAPI runs before the endpoint, via `Depends(...)` | web |
 | dependency override | swapping a FastAPI dependency for another, used in tests | web |
@@ -80,6 +84,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | metadata filter | restricting a search to chunks whose labels match, e.g. tenant_id | ai |
 | MFA | phone code on top of a password | aws |
 | model | text in, text out. Trained on huge amounts of text | ai |
+| multipart form | the request body format for file uploads: parts separated by a boundary string | web |
 | Neptune Analytics | AWS's graph engine; stores the GraphRAG graph; bills by the hour | aws |
 | next typegen | generates Next.js's route and layout types without a full build. Run before `tsc` in CI | tooling |
 | Next.js | a framework for building web apps with React | web |
@@ -99,9 +104,11 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | process | one running program with its own memory. uvicorn is one process | web |
 | profile | a named set of AWS credentials saved on the laptop | aws |
 | proxy | a server that forwards requests to another server | web |
+| proxy allowlist | the fixed list of paths a proxy forwards, so it cannot be used to reach anything else | web |
 | Pydantic | library that checks data against typed classes | web |
 | RAG | retrieval-augmented generation: find relevant document chunks, hand them to the model, answer with citations | ai |
 | React | a library for building UIs out of components | web |
+| reasoning content | a model's thinking-out-loud text, streamed separately from the answer; we do not show it | ai |
 | region | which group of AWS data centers a thing lives in | aws |
 | remote | a copy of the repo elsewhere, usually GitHub, named `origin` | tooling |
 | reranker | a careful model that re-sorts the top search results by how well each answers the question | ai |
@@ -117,13 +124,16 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | service role | an IAM role an AWS service assumes to act on your behalf, e.g. the KB reading your bucket | aws |
 | session | one conversation; in AgentCore, identified by a session id of 33+ characters | aws |
 | short-term memory | the conversation so far, replayed into each model call | ai |
+| sliding window | keep only the last N messages of a conversation in the model's context | ai |
 | SSE | Server-Sent Events: plain-text events over one long HTTP response | web |
 | static page | built once at build time and served as a file | web |
 | status code | the server's one-number verdict: 200 ok, 4xx caller's fault, 5xx server's fault | web |
 | stop reason | why the model stopped: end_turn (done) or tool_use (run this tool and come back) | ai |
 | Strands Agents | AWS's open-source agent framework; the Harness is built on it | ai |
 | streaming | sending a response in pieces as they are ready | web |
+| streaming tool use | a model sending a tool call piece by piece; not every Bedrock model supports it (Llama 4 does not) | ai |
 | Tailwind | styling with class names in the markup, e.g. `bg-indigo-600` | tooling |
+| tenant label | the `.metadata.json` file next to each upload that tags its chunks with `tenant_id` | aws |
 | TextDecoderStream | browser tool that turns a stream of bytes into text, safely across chunks | web |
 | thread | a line of work inside a process. Threads in one process share memory | web |
 | thread pool | a set of worker threads that run blocking code off the main loop. 40 by default in FastAPI | web |

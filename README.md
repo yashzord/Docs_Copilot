@@ -1,32 +1,37 @@
 # Docs Copilot
 
-Upload documents, ask questions, get answers with citations, and hand tasks to
-a team of AI agents. Built step by step as a learning project.
+Upload documents, ask questions, and get streamed answers with citations
+from one AI agent that can also read web pages and connect facts across
+documents. Built step by step as a learning project.
 
-New here? Start with `docs/learning/README.md`. Plain words, pictures, and
-a reading order.
+New here? Start with `docs/learning/README.md`: the "Start here" learning
+path, in reading order, with plain words and pictures.
 
 ---
 
 ## 1. What I'm building
 
-A workspace where you upload documents (PDFs, markdown, web pages), ask
-questions, and get answers that point to the exact passage they came
-from. For bigger jobs, a team of AI agents takes over: searching,
-connecting facts, looking things up on the web, running code, and saving
-results to your GitHub.
+A single-user app where you upload documents, ask questions, and get
+answers that point to the exact passages they came from. One agent (an
+AgentCore Harness) answers every question and picks a tool for each one:
+the document search, a knowledge-graph search for "how does X relate to
+Y", or a real web browser for a URL. It remembers past chats and your
+stated preferences.
 
 The goal is to learn how production AI systems are really built: RAG,
-agents, AWS, containers, and scaling, one working piece at a time.
+agents, AWS managed services, one working piece at a time.
 
 ### What a user can do
 
-1. Create a workspace and upload documents.
-2. Ask a question, watch the answer stream in, click a citation to see the source.
-3. Hand off a task, e.g. "compare these two specs and open an issue for the gaps".
-4. Watch each agent's steps in a trace view.
+1. Upload documents (PDF, markdown, text, Word, CSV, HTML).
+2. Ask a question, watch the answer stream in, open the numbered source cards.
+3. Give a URL: the agent reads the live page.
+4. Ask how two things relate: the agent searches the knowledge graph.
+5. Come back later: past chats are in the sidebar, and the agent remembers stated preferences.
 
-### The agent team
+A line above each answer shows which tool the agent used.
+
+### The agent and its tools
 
 | Agent | Job | Arrives |
 |---|---|---|
@@ -42,16 +47,17 @@ Two open protocols, each learned by building with it:
 
 - **MCP (Model Context Protocol):** a standard way for an agent to find and
   call tools, like a USB plug for tools. **AgentCore Gateway** is our MCP
-  server: it turns the Knowledge Base, a Lambda function, and other agents
-  into MCP tools, with login checks and policy in one place (D2 onward).
+  server: it turns the Knowledge Base and a Lambda function into MCP
+  tools, and every call to it is signed with IAM (D2 onward).
 - **Agent frameworks:** the assistant needs no framework, it is a Harness
-  (configuration). Code we do write uses **Strands Agents**, the framework
-  the Harness itself is built on. LangGraph is the common alternative;
-  we chose Strands because every AgentCore integration is native to it.
+  (configuration). If we ever write agent code (the research agent,
+  later/maybe), it will use **Strands Agents**, the framework the Harness
+  itself is built on. LangGraph is the common alternative.
 
 ```
-harness --MCP--> gateway --> Knowledge Base   "search the docs for X"
-harness --MCP--> gateway --> research agent   "research this and report back"
+harness --MCP--> gateway --> Knowledge Base                   "search the docs for X"
+harness --MCP--> gateway --> Lambda --> graph Knowledge Base  "how does X relate to Y"
+harness ---------------------------> browser                  "what does this page say"
 ```
 
 ### How it finds answers
@@ -61,9 +67,8 @@ document, turns chunks into vectors, and answers a question with hybrid
 search (meaning plus exact words) followed by a reranker (D2). A
 second knowledge base holds a knowledge graph of entities and
 relationships for "how does X relate to Y" questions (D4). The agent
-picks which one a question needs, by choosing a tool. An eval set of 30+
-questions, scored by Bedrock's built-in RAG evaluation, measures every
-change (later). The learning docs explain what happens inside each of these,
+picks which one a question needs, by choosing a tool. An eval set scored
+by Bedrock's built-in RAG evaluation may measure changes later. The learning docs explain what happens inside each of these,
 not just how to switch them on.
 
 ### Production-shaped, on purpose
@@ -75,8 +80,8 @@ not just how to switch them on.
 
 ### Ground rules
 
-- Buy the plumbing, build the brain: AWS managed services for retrieval, graph, evals, sandbox; our own code for orchestration, agents, tools, UI.
-- About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune) is created for the demo and deleted after.
+- Buy the plumbing, build the glue: AWS managed services for retrieval, the graph, the agent loop and memory; our own code for the API, the UI and one small Lambda.
+- About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour) is stopped when idle and deleted after the demo.
 - Models are config, not code: switching one is a single line.
 - Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" section in `docs/learning/`.
 
@@ -114,7 +119,7 @@ npm install                 install packages (first time, or after package.json 
 npm run dev                 start the web page on http://localhost:3000
 npm run lint                lint
 npm run typecheck           check types
-npm test                    stream parser tests
+npm test                    stream parser and citation tests
 
 ```
 
@@ -131,13 +136,16 @@ backend/             one Python project: pyproject.toml, uv.lock, .env
   app/               the API server (FastAPI): upload, chat relay, sessions   D1+
   prompts/           the harness system prompt (pasted into the console)     D2
   tests/             pytest tests                                       D1+
-infra/               terraform (D2+), kind manifests (D8)
-docs/learning/       topic tracks + one build log per deliverable
+infra/
+  iam/               IAM policies, kept as documentation                D2
+  lambda/graph_search/  the graph search Lambda + its tool schema       D4
+docs/learning/       "Start here" path, topic tracks, one build log per deliverable
 ```
 
-New backend parts (worker, agents, tool servers) start inside `backend/app`.
-One moves into its own package only when it needs different dependencies
-or its own container.
+New backend code starts inside `backend/app`. Code that AWS runs for us (the
+Lambda) lives in `infra/`. A part moves into its own package only when it
+needs different dependencies or its own container. No Terraform or
+Kubernetes files yet (later/maybe).
 
 ---
 
@@ -163,22 +171,22 @@ Decided once, with numbers checked. Not reopened without a reason.
 |---|---|---|
 | AWS region us-west-2 | us-east-1 | Bedrock rerank and AgentCore both live there |
 | Bedrock managed Knowledge Base for retrieval | OpenSearch + our own chunk/embed pipeline | hybrid search, reranker, parser and web crawler built in; no servers; pennies at our size |
-| Bedrock GraphRAG on Neptune Analytics, created for the demo and deleted after | Neo4j + our own extraction | AWS-native and 30 minutes to set up; but $3.51 an hour while running, so never left on |
+| Bedrock GraphRAG on Neptune Analytics, stopped when idle, deleted after the demo | Neo4j + our own extraction | AWS-native and quick to set up; $0.48 an hour running (16 m-NCU), about $0.05 stopped |
 | No NAT Gateway | private subnets + NAT | $32 a month for nothing we need |
-| No Redis | Redis for rate limits | one server process until D8, a counter in memory is enough |
+| No Redis | Redis for rate limits | one server process; a counter in memory would be enough |
 | No login, single user | Cognito + per-tenant search filter | finish the product end to end first; the tenant label code stays as a stub |
 | Knowledge Base's managed embedding model | Titan or Cohere chosen by us | the built-in reranker only works with the managed embeddings |
-| Bedrock Converse API | Anthropic SDK | one request shape for every model on Bedrock |
-| AWS is deploy, demo, destroy | always-on | one small Fargate task is about $9 a month, four is $36 |
+| Models reached through Bedrock (Converse) | Anthropic SDK | one request shape for every model; since D2 the Harness makes the model calls and our code calls InvokeHarness |
+| Nothing deployed: runs locally | always-on hosting | the app runs on the laptop; only managed AWS services bill, per use (Neptune by the hour) |
 | AgentCore Harness is the assistant | LangGraph supervisor + specialist agents | the loop, tool calls, memory and tracing are configuration; a supervisor was over-engineering at this scale |
 | Mistral Large 3 drives the agent | Llama 4 Maverick, gpt-oss-120b | Llama 4 cannot use tools while streaming; gpt-oss cannot drive the browser; Mistral was the only one decent at both (ai.md 2.7, 2.8) |
-| Strands for any agent code | LangGraph | the Harness is built on Strands and exports to it; every AgentCore integration is native |
-| AgentCore Gateway is the MCP server | FastMCP servers | Knowledge Base, Lambda and other agents become MCP tools with auth and policy in one place |
+| Strands if we ever write agent code (later/maybe) | LangGraph | the Harness is built on Strands and exports to it; every AgentCore integration is native |
+| AgentCore Gateway is the MCP server | FastMCP servers | the Knowledge Base and a Lambda become MCP tools, with IAM auth in one place |
 | AgentCore Memory for chat history | Postgres in Docker | sessions and messages per user, long-term facts for free; no database to run |
 | No queue or worker for now | SQS + worker | the Knowledge Base's ingestion job already runs in the background |
-| Bedrock RAG evaluation for the scorecard | RAGAS | a judge model built in, no library; RAGAS is the fallback |
+| Bedrock RAG evaluation for a scorecard (later/maybe) | RAGAS | a judge model built in, no library; RAGAS is the fallback |
 | Terraform, CI eval gate, k6, kind after the reverse-learning pass | during the build | product first; AWS resources are made in the console for now |
-| kind manifests last, learning only | none | nothing deploys to Kubernetes, EKS is banned by budget |
+| kind manifests later/maybe, learning only | none | nothing deploys to Kubernetes, EKS is banned by budget |
 | One flat backend project (`backend/app`) | uv workspace + `src` layout | one package today; split only when a part needs its own dependencies or container |
 
 Budget: about $200 in credits, alarm at $30 a month. This account gets credits
@@ -194,16 +202,25 @@ only, not the old 12-month free services. No EKS. No OpenSearch Serverless.
 4. No login: `tenant_id` is a fixed stub (`dev`) set by the Next.js proxy. It is still validated at the API because it becomes the Memory actor id.
 5. No secrets in git. `.env` is ignored, `.env.example` is committed.
 
-Also: tests cover the happy path and the failure path. Bedrock is faked in
-tests with a small fake client passed in through FastAPI dependency
-overrides (botocore Stubber cannot fake a streaming response). Commits use
+Also: tests cover the happy path and the failure path. AWS is faked in
+tests: small fake clients (FakeAgentCore, FakeKb) passed in through FastAPI
+dependency overrides, and moto for S3 (botocore Stubber cannot fake a
+streaming response). Commits use
 Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 ---
 
 ## 7. Learning docs
 
-`docs/learning/`: four topic tracks (`ai.md`, `aws.md`, `tooling.md`,
-`web.md`) that grow one section per topic, a `glossary.md`, and one build
-log per deliverable (`D1.md`, `D2.md`, ...) that links into the tracks. Written
-for a beginner, pictures over paragraphs, self-check at the end of each.
+Start with `docs/learning/README.md`, the "Start here" learning path:
+
+1. the whole system in one picture;
+2. `journey.md`: one question followed hop by hop, file by file;
+3. one module per piece, each linking into the topic tracks;
+4. the build logs (`D1.md` to `D4.md`) as history.
+
+Interactive map: link in docs/learning/README.md.
+
+Behind the path: four topic tracks (`ai.md`, `aws.md`, `tooling.md`,
+`web.md`) and `glossary.md`. Written for a beginner, pictures over
+paragraphs, self-check at the end of each.

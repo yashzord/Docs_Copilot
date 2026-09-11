@@ -8,7 +8,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | actor id | AgentCore Memory's name for the user a memory belongs to | aws |
 | agent | a model in a loop: decide, call a tool, read the result, decide again | ai |
 | agent loop | the code around the model that runs tool calls and feeds results back | ai |
-| AgentCore | Bedrock's set of managed services for running agents: Harness, Gateway, Memory, Identity, Runtime, ... | aws |
+| AgentCore | Bedrock's set of managed services for running agents. We use Harness, Gateway, Memory and the Browser tool; Identity and Runtime exist but are not used here | aws |
 | API | a program other programs talk to over HTTP | web |
 | App Router | Next.js's way of turning folders into URLs | web |
 | ARN | Amazon Resource Name: the full address of one AWS resource, e.g. arn:aws:lambda:us-west-2:<account>:function:<name> | aws |
@@ -49,7 +49,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | endpoint | one URL path + method the server answers, e.g. `POST /v1/chat` | web |
 | entity | a thing named in text: a person, team, service, product. A node in the knowledge graph | ai |
 | ESLint | the linter for JavaScript and TypeScript | tooling |
-| eval set | fixed list of questions with known good answers, used to score models and RAG | ai |
+| eval set | fixed list of questions with known good answers, used to score models and RAG. This project has none yet | ai |
 | event loop | the main thread's to-do loop in an async server: take a request, send a piece, repeat, never wait | web |
 | event stream | a response that arrives as a series of small events | web |
 | execution role | the IAM role a Harness or Runtime agent acts as | aws |
@@ -61,6 +61,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | Gateway | AgentCore's managed MCP server: wraps APIs, Lambdas, Knowledge Bases and agents as tools | aws |
 | GIL | Python's lock: one thread runs Python code at a time, but a thread waiting on the network steps aside | web |
 | graph construction model | the model that reads each chunk during a GraphRAG sync and writes out things and their relationships (ours: Nova 2 Lite) | aws |
+| graph walk | at query time, following the graph from the chunks a search found to other chunks that name the same things | ai |
 | GraphRAG | RAG that also walks a knowledge graph of entities and relationships | ai |
 | hallucination | the model states something its sources do not say | ai |
 | Harness | AgentCore's managed agent: model, instructions, tools and memory declared as config | aws |
@@ -108,6 +109,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | policy | JSON list of what an AWS identity may do | aws |
 | process | one running program with its own memory. uvicorn is one process | web |
 | profile | a named set of AWS credentials saved on the laptop | aws |
+| prompt file | `backend/prompts/assistant.md`: the agent's system prompt, kept in git and pasted into the harness; its rules route questions to tools | ai |
 | proxy | a server that forwards requests to another server | web |
 | proxy allowlist | the fixed list of paths a proxy forwards, so it cannot be used to reach anything else | web |
 | Pydantic | library that checks data against typed classes | web |
@@ -125,6 +127,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | route handler | a `route.ts` file in Next.js: an API endpoint, not a page | web |
 | RRF | reciprocal rank fusion: merging two ranked lists by position, not score | ai |
 | Runtime (AgentCore) | serverless hosting for agent code you write, uploaded as a zip or container | aws |
+| self-managed Knowledge Base | a Knowledge Base where you choose the store, embeddings and chunking; the console calls it Unstructured Vector Store KB. Our graph one | aws |
 | server component | a React component that runs on the server. The default in the App Router | web |
 | service role | an IAM role an AWS service assumes to act on your behalf, e.g. the KB reading your bucket | aws |
 | session | one conversation; in AgentCore, identified by a session id of 33+ characters | aws |
@@ -137,8 +140,9 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | Strands Agents | AWS's open-source agent framework; the Harness is built on it | ai |
 | streaming | sending a response in pieces as they are ready | web |
 | streaming tool use | a model sending a tool call piece by piece; not every Bedrock model supports it (Llama 4 does not) | ai |
+| system prompt | standing instructions sent with every model call, before the user's words | ai |
 | Tailwind | styling with class names in the markup, e.g. `bg-indigo-600` | tooling |
-| tenant label | the `.metadata.json` file next to each upload that tags its chunks with `tenant_id` | aws |
+| tenant label | the `.metadata.json` file next to each upload that tags its chunks with `tenant_id: dev`. Written on every upload, but no search filter uses it: the app has one user | aws |
 | TextDecoderStream | browser tool that turns a stream of bytes into text, safely across chunks | web |
 | thread | a line of work inside a process. Threads in one process share memory | web |
 | thread pool | a set of worker threads that run blocking code off the main loop. 40 by default in FastAPI | web |

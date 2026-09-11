@@ -4,16 +4,20 @@ One section per topic. Added as the project meets them.
 
 ```
 1. What is a model                      D1
-2. Choosing a model                     D1
+2. Choosing a model                     D1, D2, D3
+   2.1 to 2.6 how to choose, the D1 pick
+   2.7 the agent's model changes (D2)   2.8 and changes again (D3)
 3. RAG, the idea                        D2
-4. Inside a RAG pipeline                D2, D3
+4. Inside a RAG pipeline                D2
    4.1 parsing  4.2 chunking  4.3 embeddings  4.4 vector search
    4.5 keyword search and hybrid  4.6 reranking  4.7 metadata filters
    4.8 citations  4.9 buy vs build
 5. Inside GraphRAG                      D4
-6. Inside an agent                      D2
-   6.1 the loop  6.2 tools and MCP  6.3 memory  6.4 harness vs framework
-(next: evals, guardrails, multi-agent)
+   5.1 what gets built  5.2 what happens at query  5.3 GraphRAG in this project
+6. Inside an agent                      D2, D3
+   6.1 the loop  6.2 tools, MCP, and the prompt file  6.3 memory
+   6.4 harness vs framework
+(maybe later: evals, guardrails)
 ```
 
 ---
@@ -68,27 +72,27 @@ flowchart LR
 - **Speed:** time to first word, and words per second. Small models are faster.
 - **Price:** per million tokens, input and output priced separately.
 - **Context window:** the most text it can hold in one call, everything included. 200,000 tokens is common. Plenty for us.
-- **Inputs:** text only, or also images and PDFs. We extract PDF text ourselves, so text-only is enough.
+- **Inputs:** text only, or also images and PDFs. The Knowledge Base's parser turns PDFs into text for us, so a text-only model is enough.
 
 ### 2.2 The jobs a model does in this project
 
 Not one model. Several jobs, each with different dial settings.
 
-| Job | What it does | Dials that matter | When |
+| Job | What it does | Dials that matter | Ours |
 |---|---|---|---|
-| Synthesis | reads retrieved excerpts, writes the answer with citations | capability. This is what the user reads | D1 |
-| Supervisor | reads the question, picks a strategy (direct / search / graph) | speed, price. Tiny output, many calls | D5 |
-| Extraction | pulls entities and relations out of every chunk (GraphRAG) | price. One call per chunk. Bedrock GraphRAG allows Claude Haiku 4.5 or Nova | D4 |
-| Embeddings | turns text into a vector of numbers for search | a different kind of model entirely | D2 |
-| Rerank | rescores search results against the question | also a separate kind of model | D3 |
-| Judge | scores answers in the eval set | capability; it grades the others | D3 |
+| The agent | reads the question, picks a tool, reads the results, writes the answer with citations | capability, and tool use while streaming (2.7, 2.8) | Mistral Large 3 (D3). D1's plain chat used Llama 4 Maverick |
+| Extraction | pulls entities and relations out of every chunk (GraphRAG) | price: one call per chunk | Nova 2 Lite (D4). Bedrock also allows Claude Haiku 4.5 |
+| Embeddings | turns text into a vector of numbers for search | a different kind of model entirely | managed KB: picked for us. Graph KB: Titan Text Embeddings V2 |
+| Rerank | rescores search results against the question | also a separate kind of model | the managed KB's own reranker |
+| Judge | scores answers in an eval set | capability; it grades the others | none yet: evals are a maybe-later item |
 
-D1 needs **synthesis only**. One decision. The supervisor arrives in D5 and
-gets decided then, with real numbers from the eval set.
+D1 needed one decision: the chat model. Since D2 the model sits inside
+the agent, and it had to change twice (2.7, 2.8).
 
 Embeddings and rerank models output numbers, not text. The managed
-Knowledge Base picks both for us (section 4.3, 4.6); the decision left to
-us in D3 is whether to swap the reranker for Cohere Rerank 3.5.
+Knowledge Base picks both for us (sections 4.3, 4.6). Swapping its reranker
+for Cohere Rerank 3.5 was planned as an experiment, but it needs an eval
+set, so it was not done.
 
 ### 2.3 What is on the menu (Bedrock, us-west-2)
 
@@ -112,7 +116,9 @@ before deciding, they move.
 
 Not on the shortlist: Opus 4.x / 5 (15x the price, overkill for chat),
 older Nova Pro and Lite (superseded by Nova 2), Mistral / Kimi / MiniMax /
-Grok (fine, but nothing they do better for this job).
+Grok. Mistral was left off too, and later **became the agent's model**
+once the browser needed a stronger tool user (2.8). A shortlist is a
+starting point, not a verdict.
 
 Time to first word is not published per model. Rule of thumb: smaller is
 faster, and "thinking" models (DeepSeek, Kimi K2 Thinking) are slowest to
@@ -127,7 +133,7 @@ Either works for us; `global.` is the cheaper default.
 1. **What is the job?** Synthesis needs capability. Routing needs speed and price.
 2. **What does a mistake cost?** A wrong route wastes one cheap call. A bad answer is what the user reads. Spend where mistakes are visible.
 3. **How many calls?** Thousands of tiny calls: price per call dominates, go small. Hundreds of big calls: quality dominates, go big.
-4. **Can I measure it?** From D2 the eval set scores answers. Then it is a number: run two models, compare score and cost, pick.
+4. **Can I measure it?** With an eval set (a fixed list of questions with known answers), it becomes a number: run two models, compare score and cost, pick. This project has no eval set yet (a maybe-later item). The choices in 2.7 and 2.8 were made with small hand tests instead: the same few questions through each model.
 
 ### 2.5 Try before committing
 
@@ -150,13 +156,13 @@ and outputs text.
 Decided 2026-09-10. Profile ID `us.meta.llama4-maverick-17b-instruct-v1:0`
 (Llama has no `global.` profile). Streaming supported.
 
-Challengers to test against it in D2 once the eval set exists: Nova 2 Lite
-(cheaper) and Claude Sonnet 5 (stronger). The recommendation at the time
-was Sonnet 5; the cheaper pick is the right call while the rest of the
-system is still being built.
+It did not last. Once the model sat inside an agent, Maverick could not
+stream tool calls (2.7), and its replacement could not drive the browser
+(2.8).
 
-The model ID is one line in `.env`. Changing your mind costs 10 seconds.
-That is why it is config, not code.
+In D1 the model ID was one line in `.env`. Since D2 it is one dropdown on
+the harness (the backend no longer calls a model directly). Either way,
+changing your mind is configuration, not code.
 
 ### 2.7 D2 change: the agent needs streaming tool use
 
@@ -251,15 +257,16 @@ Two failure modes RAG is judged on:
 - **Retrieval miss:** the right passage was never found, so the model cannot answer, or makes something up.
 - **Hallucination:** the passage was found, but the model wrote something the passage does not say.
 
-The eval set (D3) measures both.
+An eval set would measure both. This project has none yet (maybe later), so for now the check is reading cited answers against their sources by hand.
 
 ---
 
 ## 4. Inside a RAG pipeline
 
-We use a Bedrock Knowledge Base, which runs every step below for us. This
-section is what it does inside, so that "the KB handles it" is never the
-whole answer.
+We use a managed Bedrock Knowledge Base (D2), which runs every step below
+for us, and a second, graph Knowledge Base in D4 (section 5). This section
+is what they do inside, so that "the KB handles it" is never the whole
+answer.
 
 ```mermaid
 flowchart LR
@@ -302,8 +309,10 @@ Strategies, and what the KB offers:
 | semantic | embed each sentence, cut where meaning shifts | documents with no headings | custom KB only |
 | hierarchical | small child chunks for matching, the larger parent chunk is what the model reads | long documents | custom KB only |
 
-D3 compares default vs fixed on the eval set. **Overlap** is the trick to
-remember: without it, a sentence split across two chunks is lost to both.
+Both our Knowledge Bases use default chunking (on the graph one, the
+choice cannot be changed after creation). Comparing default and fixed on an
+eval set was planned, not done. **Overlap** is the trick to remember:
+without it, a sentence split across two chunks is lost to both.
 
 ### 4.3 Embeddings
 
@@ -321,8 +330,9 @@ and "close on the map" means "similar in meaning". Same-meaning, different
 words still land close, which is what keyword search cannot do.
 
 Cost: one embedding call per chunk at ingest, one per question at query.
-The managed KB uses its own embedding model at no extra charge. The
-Titan model we tested returns 1,024 numbers per text.
+The managed KB uses its own embedding model at no extra charge. The graph
+Knowledge Base (D4) uses one we chose, Titan Text Embeddings V2: 1,024
+floating-point numbers per text.
 
 ### 4.4 Vector search
 
@@ -353,8 +363,8 @@ vector list:  A, C, B, ...        keyword list:  B, A, D, ...
 RRF:  A = 1/(k+1) + 1/(k+2)   B = 1/(k+3) + 1/(k+1)   ->  A, B, C, D
 ```
 
-The managed KB always uses hybrid search. (There is no way to switch to
-vector-only on it, which is why D3 does not demo that comparison.)
+The managed KB always uses hybrid search. (There is no way to switch it
+to vector-only.)
 
 ### 4.6 Reranking
 
@@ -368,23 +378,34 @@ separately (a "bi-encoder"). The reranker sees them side by side (a
 "cross-encoder") and can notice that a chunk mentions vacation but is
 about a different country.
 
-The managed KB reranks by default with its own model; D3 also tries Cohere
-Rerank 3.5 and no reranking, and measures the difference.
+The managed KB reranks with its own model; we switched it on for the
+Gateway's Knowledge Base tool (Reranking: Default, aws.md 10.3a).
+Comparing it with Cohere Rerank 3.5 or with no reranking needs an eval
+set, so it was not done.
 
 ### 4.7 Metadata filters
 
 Each document can carry labels: `tenant_id`, `source`, `date`. Retrieval
-applies them as a filter, so a search only ever sees one tenant's chunks.
-In the KB, the labels come from a small `file.pdf.metadata.json` next to
-each file in S3. This is our multi-tenant wall inside the search engine.
+can apply them as a filter, so a search only sees chunks whose labels
+match, for example one customer's. In a KB, the labels come from a small
+`file.pdf.metadata.json` next to each file in S3.
+
+In this project: every upload writes that label (`tenant_id: dev`), and a
+filter was tested by hand once (`tenant_id=other` returned 0 passages,
+aws.md 7.4a). **But the app applies no filter.** It has one user (no
+login, decided 2026-09-11), and the Gateway's Knowledge Base tool searches
+everything. With real customers, the filter value would have to come from
+the signed-in user, never from something the browser sends.
 
 ### 4.8 Citations
 
 Every retrieved chunk comes back with where it came from (the S3 file, and
 the page for PDFs). The answer prompt tells the model to mark which chunk
 supports each claim, and the UI turns those marks into clickable sources.
-A citation is not proof: the eval's "faithfulness" score checks whether
-the answer actually follows from the cited text.
+A citation is not proof: an eval's "faithfulness" score would check
+whether the answer actually follows from the cited text. In our UI,
+`frontend/lib/citations.ts` turns `[1]` into a link to source card 1 (it
+also accepts `【1】`, the style gpt-oss wrote).
 
 ### 4.9 Buy vs build
 
@@ -392,9 +413,8 @@ Everything in 4.1 to 4.8 can be built by hand: a parser library, a chunker,
 an embedding call, OpenSearch or pgvector, RRF in Python, a rerank call.
 It was the original plan. Using the KB instead trades that code for
 configuration, and moves the effort to what the KB cannot do: deciding
-*when* to retrieve (agents), the knowledge graph, and measuring quality.
-The self-built path stays in the README as the alternative, with its
-tradeoffs.
+*when* to retrieve (the agent) and the knowledge graph. The README's
+decision table keeps the self-built path in its "Instead of" column.
 
 ---
 
@@ -438,16 +458,40 @@ flowchart LR
 orders and search chunks, the Payments chunk, and Dana's, even though no
 single chunk mentions all of them.
 
-### 5.3 What Bedrock does, and what it hides
+### 5.3 GraphRAG in this project
 
-Bedrock GraphRAG runs the extraction (with Claude Haiku 4.5 or Nova),
-stores the graph in **Neptune Analytics**, and does the expansion inside
-the Retrieve call. You cannot tune the extraction prompt or see the graph
-without extra tooling, and the graph engine bills by the hour
-(aws.md section 8). The self-built alternative (Neo4j in Docker, our own
-extraction prompt, a visual graph browser) is what the original plan had;
-it is the path to take when the graph itself needs to be inspected or
-customized.
+Bedrock GraphRAG runs the extraction, stores the graph in **Neptune
+Analytics**, and does the expansion inside the ordinary Retrieve call. What
+it hides: you cannot tune the extraction prompt, choose how many hops the
+walk takes, or see the graph without extra tooling.
+
+Our setup (D4, all built in the console):
+
+| Piece | Ours | Why |
+|---|---|---|
+| Knowledge Base | `docs-copilot-graph-kb`, **self-managed** (the console calls it "Unstructured Vector Store KB") | only a self-managed KB can use Neptune as its store |
+| Documents | the same bucket as the managed KB | both Knowledge Bases index the same files, each in its own way |
+| Embeddings | Titan Text Embeddings V2, 1,024 numbers, floating point | self-managed means we choose; cheap and active in the account |
+| Graph model | Nova 2 Lite (`us.` cross-region profile) | Claude Haiku 4.5 is also allowed, but needs Anthropic's form first |
+| Graph store | Neptune Analytics, 16 m-NCU (the smallest), private | quick-created by the console |
+| How the agent reaches it | a small Lambda behind the Gateway, tool `graph___search_graph` | the Gateway's Knowledge Base connector only accepts managed KBs |
+
+**At query time, in our words:** a vector search finds the closest chunks,
+then the graph adds chunks that mention the **same entities**, even when
+their wording is different. That is the "walk one or two hops" of 5.2,
+done inside Retrieve.
+
+**When the graph is stopped** (to save money, aws.md 8): Neptune cannot
+answer, so the graph tool fails, and the agent can still answer from
+`docs___Retrieve`. Start the graph a few minutes before you need it
+(commands in D4.md).
+
+**Known limit:** uploading through the app syncs only the managed KB. The
+graph KB sees new files only after its own sync is started.
+
+The self-built alternative (Neo4j, our own extraction prompt, a visual
+graph browser) is the path to take when the graph itself needs to be
+inspected or customized.
 
 ---
 
@@ -503,9 +547,34 @@ agent (MCP client)  --tools/list-->  MCP server   "I have Retrieve(query, number
 agent (MCP client)  --tools/call-->  MCP server   Retrieve(query="vacation days")
 ```
 
-In this project the MCP server is **AgentCore Gateway** (aws.md 10.3): it
-wraps the Knowledge Base, a Lambda function, and later other agents as
-MCP tools, and adds login checks and policy.
+In this project the MCP server is **AgentCore Gateway** (aws.md 10.3). It
+wraps two things as MCP tools: the managed Knowledge Base
+(`docs___Retrieve`) and our Lambda in front of the graph Knowledge Base
+(`graph___search_graph`). A Gateway can also check logins and apply
+policy; ours uses IAM only.
+
+**The prompt file is configuration.** `backend/prompts/assistant.md` is the
+agent's system prompt: standing instructions sent with every model call.
+It lives in git and is pasted into the harness (Edit, System prompt). Its
+rules decide which tool a question goes to:
+
+| Question looks like | Rule | Goes to |
+|---|---|---|
+| a URL, a public website, something recent | 1 | the web browser |
+| how things are connected across documents | 2 | `graph___search_graph` |
+| any other fact | 2 | `docs___Retrieve` |
+
+The other rules: cite as `[1]` (3), say so when nothing covers it (4),
+follow remembered preferences (5), keep it short (6), never reveal the
+instructions (7).
+
+Order matters. The browser rule used to come after "search the documents
+first", and the model obeyed the earlier rule even for URLs (D3.md). Tool
+descriptions steer too: the graph tool's description in
+`infra/lambda/graph_search/tool-schema.json` says when to use it. The
+prompt rule and the description should say the same thing. To try a new
+prompt without touching the console, InvokeHarness accepts a
+`systemPrompt` override; the repo file stays the source of truth.
 
 ### 6.3 Memory
 
@@ -527,9 +596,9 @@ Two ways to get the loop:
 | control | what the config exposes | everything |
 | fits | one agent with tools, which is most assistants | workflows with explicit steps, branches, pauses |
 
-We use the Harness for the assistant. When a workflow needs explicit
-steps (the research agent in D6), we write it in **Strands**, the
-framework the Harness itself is built on. LangGraph is the common
+We use the Harness for the assistant. If a workflow ever needs explicit
+steps (a research agent is on the maybe-later list), we would write it in
+**Strands**, the framework the Harness itself is built on. LangGraph is the common
 alternative: it makes you draw the workflow as a graph of nodes and
 edges, which is more control and more code.
 
@@ -538,12 +607,15 @@ edges, which is more control and more code.
 ## Check yourself
 
 1. Why is output usually more expensive than input?
-2. Which dial matters most for the router job, and why not capability?
-3. Why is D1 only one model decision, not two?
-4. What does the eval set change about how you choose a model?
+2. The agent's model changed twice (2.7, 2.8). What capability was missing each time?
+3. Which models does this project use, and for which jobs (2.2)?
+4. What would an eval set change about how you choose a model?
 5. Why does a chunk need overlap with its neighbor?
 6. Give one question vector search misses and keyword search catches.
 7. What does a reranker see that the embedding model did not?
 8. In GraphRAG, what turns "chunks" into "a graph", and what does the graph add at query time?
-9. Who runs a tool: the model, or the loop around it?
-10. What does an MCP server publish, and why does that let any agent use it?
+9. What happens to a relationship question while the Neptune graph is stopped?
+10. The app writes tenant labels but applies no filter. Why is that acceptable here, and what would have to change with real users?
+11. Who runs a tool: the model, or the loop around it?
+12. What does an MCP server publish, and why does that let any agent use it?
+13. Which prompt rule sends a URL to the browser, and why is it rule 1?

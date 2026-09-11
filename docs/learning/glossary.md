@@ -50,6 +50,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | MFA | phone code on top of a password | aws |
 | model | text in, text out. Trained on huge amounts of text | ai |
 | Next.js | a framework for building web apps with React | web |
+| next typegen | generates Next.js's route and layout types without a full build. Run before `tsc` in CI | tooling |
 | node_modules | installed npm packages. Never committed | tooling |
 | npm | Node's package manager | tooling |
 | on-demand | pay per token, no commitment | aws |

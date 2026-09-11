@@ -365,12 +365,31 @@ as the backend's runtime vs dev groups.
 It also has `scripts`, short names for commands:
 
 ```
-npm run dev         next dev          dev server with hot reload
-npm run build       next build        production build
-npm run lint        eslint            lint
-npm run typecheck   tsc --noEmit      typecheck only, write no files
-npm test            node --test ...   parser tests (section 10)
+npm run dev         next dev                       dev server with hot reload
+npm run build       next build                     production build
+npm run lint        eslint                         lint
+npm run typecheck   next typegen && tsc --noEmit   generate Next's types, then typecheck
+npm test            node --test ...                parser tests (section 10)
 ```
+
+**Gotcha, caught by the first CI run:** some types used in our code, like
+`LayoutProps` in `app/layout.tsx`, are not written by us. Next.js generates
+them into `.next/` whenever `next dev` or `next build` runs. On the laptop
+they already existed, so `tsc` passed. CI starts from a fresh checkout
+with no `.next/`, so it failed:
+
+```
+app/layout.tsx(20,50): error TS2304: Cannot find name 'LayoutProps'.
+```
+
+The fix, straight from the Next.js CLI docs: generate the types first,
+with `next typegen && tsc --noEmit`. Reproduced in a fresh clone before
+fixing, then passed there.
+
+The lesson is bigger than Next.js: "works on my machine" usually means
+"depends on a file my machine happened to have". A clean CI checkout is
+exactly what catches that.
+Docs: https://nextjs.org/docs/app/api-reference/cli/next#next-typegen-options
 
 ### 9.1 How the frontend was created
 

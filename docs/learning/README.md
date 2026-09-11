@@ -31,4 +31,6 @@ the project moves. If something is wrong or unclear, fix it in place.
 3. `ai.md` sections 1 and 2 (what a model is, how to choose one)
 4. `web.md` sections 1 to 7 (HTTP, FastAPI, streaming, errors)
 5. `tooling.md` sections 6 to 8 (package layout, tests, type stubs)
-6. `D1.md` (the build log that ties it together)
+6. `web.md` sections 8 to 11 (Next.js, the proxy, reading a stream)
+7. `tooling.md` sections 9 and 10 (npm, Node's test runner)
+8. `D1.md` (the build log that ties it together)

@@ -11,6 +11,8 @@ One section per tool. Added as the project meets them.
 6. The backend layout         D1
 7. pytest                     D1
 8. Type stubs and plugins     D1
+9. npm and package.json       D1
+10. Node's test runner        D1
 (next: Docker, compose, Terraform, kind, k6)
 ```
 
@@ -342,6 +344,106 @@ mypy checks types, but some libraries hide their types.
 
 ---
 
+## 9. npm and package.json
+
+npm is to the frontend what uv is to the backend. Same ideas, other names:
+
+| Idea | Backend (Python) | Frontend (Node) |
+|---|---|---|
+| package manager | uv | npm |
+| shopping list | `pyproject.toml` | `package.json` |
+| exact versions (commit it) | `uv.lock` | `package-lock.json` |
+| installed packages (never commit) | `.venv/` | `node_modules/` |
+| install everything | `uv sync` | `npm install` |
+| install exactly the lock (CI) | `uv sync --locked` | `npm ci` |
+| run a tool | `uv run pytest` | `npm run lint`, `npm test` |
+
+`package.json` has two lists: `dependencies` (shipped: next, react) and
+`devDependencies` (checking only: typescript, eslint, tailwind). Same split
+as the backend's runtime vs dev groups.
+
+It also has `scripts`, short names for commands:
+
+```
+npm run dev         next dev          dev server with hot reload
+npm run build       next build        production build
+npm run lint        eslint            lint
+npm run typecheck   tsc --noEmit      typecheck only, write no files
+npm test            node --test ...   parser tests (section 10)
+```
+
+### 9.1 How the frontend was created
+
+```
+npx create-next-app@latest frontend --ts --eslint --tailwind --app \
+  --no-src-dir --import-alias "@/*" --use-npm --disable-git --no-agents-md --yes
+```
+
+| Flag | Why |
+|---|---|
+| `--ts --eslint --app` | TypeScript, linting, the App Router |
+| `--tailwind` | style with class names (below) |
+| `--disable-git` | we already have a repo; don't create a second one inside it |
+| `--no-agents-md` | no AI tooling files in the repo (same rule as `CLAUDE.md`) |
+
+Then the unused boilerplate (sample SVGs, the template README) was deleted.
+Docs: https://nextjs.org/docs/app/api-reference/cli/create-next-app
+
+**Gotcha:** `--no-agents-md` only covers creating the project. From Next.js
+16.3, `next dev` writes `AGENTS.md` and `CLAUDE.md` itself whenever it
+detects an AI coding agent, and puts them back if you delete them. The real
+off switch is one line in `next.config.ts`:
+
+```ts
+agentRules: false,
+```
+
+Found by checking three places, which is the habit worth copying: the
+docs ("Opting out" section), the installed code
+(`node_modules/next/dist/server/lib/start-server.js`, which only writes
+the files when `agentRules !== false`), and the config schema (a boolean).
+Docs: https://nextjs.org/docs/app/guides/ai-agents#opting-out
+
+### 9.2 Tailwind
+
+Styling by class names written right in the JSX, instead of a separate CSS
+file:
+
+```tsx
+<button className="rounded-xl bg-indigo-600 px-5 text-white disabled:opacity-40">
+```
+
+reads as: rounded corners, indigo background, horizontal padding, white
+text, faded when disabled. `dark:` classes apply when the computer is in
+dark mode.
+
+---
+
+## 10. Node's test runner
+
+The SSE parser is plain TypeScript with fiddly edge cases, so it gets
+tests. Node ships a test runner, so no test library is installed:
+
+```ts
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+test("holds a half-received event until the rest arrives", () => { ... });
+```
+
+Two details that make it work:
+
+- **Node 24 runs `.ts` files directly.** It strips the type annotations and runs what is left. On since Node 23.6.
+- **The import needs the extension:** `import { createSseParser } from "./sse.ts"`. Node requires it; TypeScript normally forbids it, so `tsconfig.json` sets `allowImportingTsExtensions` (allowed because the project never emits `.js` files).
+
+The five tests: complete events, an event split across chunks, keep-alive
+comments skipped, CRLF line endings split across chunks, an event with no
+name.
+
+Docs: https://nodejs.org/api/test.html and https://nodejs.org/api/typescript.html
+
+---
+
 ## Check yourself
 
 1. What are the three places a file passes through on the way to GitHub?
@@ -353,3 +455,5 @@ mypy checks types, but some libraries hide their types.
 7. What does a fake give you that a real AWS call in a test would not?
 8. Why is `boto3-stubs` imported only inside `if TYPE_CHECKING:`?
 9. When would the backend become a workspace again?
+10. What is the npm equivalent of `uv.lock`, and of `uv sync --locked`?
+11. Why does `sse.test.ts` import `./sse.ts` with the extension?

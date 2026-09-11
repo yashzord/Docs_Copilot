@@ -10,7 +10,11 @@ One section per topic. Added as the project meets them.
 5. Errors before vs during a stream          D1
 6. def vs async def                          D1
 7. uvicorn: the thing that runs the app      D1
-(next: Next.js App Router, server vs client components, TypeScript strict)
+8. Next.js App Router: folders are URLs      D1
+9. Server components vs client components    D1
+10. The proxy route                          D1
+11. Reading a stream in the browser          D1
+(next: login with Cognito, file uploads, citation panel)
 ```
 
 ---
@@ -364,6 +368,189 @@ Docs: https://github.com/kludex/uvicorn/blob/main/docs/settings.md
 
 ---
 
+## 8. Next.js App Router: folders are URLs
+
+Next.js is a framework for building web pages with React. Its App Router
+turns folders into URLs: you never write a routing table.
+
+```
+frontend/
+  app/
+    layout.tsx           wraps every page: <html>, <body>, fonts, the tab title
+    page.tsx             the page at  /
+    api/chat/route.ts    not a page: an API endpoint at  POST /api/chat
+  components/Chat.tsx    the chat window. Not a route, just a piece of UI
+  lib/sse.ts             plain TypeScript helper, no React
+```
+
+Two file names are special:
+
+- `page.tsx` = "this folder is a page you can visit"
+- `route.ts` = "this folder is an API endpoint"
+
+`npm run build` prints what it made of them:
+
+```
+○ /            static: built once, served as a ready file
+ƒ /api/chat    dynamic: runs on every request
+```
+
+The page can be prebuilt because it looks the same for everyone. The chat
+endpoint cannot: every request is different.
+
+Docs: https://nextjs.org/docs/app
+
+---
+
+## 9. Server components vs client components
+
+In the App Router, every component runs **on the server** unless the file
+starts with `"use client"`.
+
+```mermaid
+flowchart LR
+    S["page.tsx<br/>server component<br/>runs on the server, sends HTML"] --> C["Chat.tsx<br/>'use client'<br/>runs in the browser"]
+    C --> B[state, clicks, typing,<br/>streaming fetch]
+```
+
+| | Server component | Client component |
+|---|---|---|
+| Runs | on the server | in the browser (after a first render on the server) |
+| Can use | secrets, env vars, databases | state (`useState`), events (`onClick`), browser APIs |
+| Cannot use | state, events | server-only secrets |
+
+`Chat.tsx` needs state (the messages), events (typing, Send) and the
+browser's streaming `fetch`, so it is a client component. `page.tsx` needs
+none of that, so it stays a server component and just renders `<Chat />`.
+
+Docs: https://nextjs.org/docs/app/getting-started/server-and-client-components
+
+---
+
+## 10. The proxy route
+
+The browser never talks to FastAPI. It talks to Next.js, which forwards
+the request:
+
+```mermaid
+sequenceDiagram
+    participant Br as browser
+    participant N as Next.js /api/chat
+    participant F as FastAPI /v1/chat
+    participant Bd as Bedrock
+    Br->>N: POST {messages}
+    N->>F: POST {messages} + X-Tenant-Id
+    F->>Bd: converse_stream
+    Bd-->>F: pieces
+    F-->>N: event: delta ...
+    N-->>Br: event: delta ... (passed straight through)
+```
+
+This pattern has a name: **BFF, backend for frontend**. Why bother:
+
+1. **Same origin.** The page and `/api/chat` share an address, so the browser's cross-origin rules (CORS) never come up.
+2. **Secrets stay on the server.** The FastAPI address, and from D2 the login token, never reach the browser.
+3. **One place to add headers.** The tenant header is added here. In D2 it will come from the Cognito login.
+
+### 10.1 What the route does, line by line in spirit
+
+| Step | Why |
+|---|---|
+| read `API_URL` from the environment | where FastAPI lives. No `NEXT_PUBLIC_` prefix, so it is server-only |
+| forward the body untouched | FastAPI validates it. One set of rules, in one place |
+| add `X-Tenant-Id: dev` | stub until Cognito in D2 (marked `ponytail:` in the code) |
+| pass `request.signal` along | if the browser tab closes, the backend call is cancelled too |
+| return FastAPI's body, status, `Retry-After` | a 422 or 503 reaches the browser unchanged |
+| set `Cache-Control: no-cache, no-transform` | `no-transform` stops compression from holding pieces until the end |
+| FastAPI unreachable: return 502 and log it | the page gets a clear message, the log gets the cause |
+
+### 10.2 Env vars on the frontend
+
+```
+frontend/.env.local      your real values, gitignored (Next.js's convention)
+frontend/.env.example    the committed template
+```
+
+Next.js loads `.env.local` automatically. A variable **without**
+`NEXT_PUBLIC_` exists only on the server. A variable **with** it is copied
+into the JavaScript sent to every browser, so it must never hold a secret.
+
+Gotcha found while building: Next's own `frontend/.gitignore` ignores every
+`.env*` file, and a `.gitignore` in a subfolder beats the one at the root.
+So `!.env.example` had to be added there too.
+
+Docs: https://nextjs.org/docs/app/guides/environment-variables
+
+Verified 2026-09-10: a real answer streamed through the proxy piece by
+piece; a 422 passed through; with FastAPI stopped the proxy answered 502
+"The backend is not reachable."
+
+---
+
+## 11. Reading a stream in the browser
+
+The browser has a built-in SSE client, `EventSource`, but it can only send
+GET requests with no body. A chat needs POST with the conversation in the
+body, so we read the stream by hand:
+
+```mermaid
+flowchart LR
+    B[bytes from fetch] --> D[TextDecoderStream<br/>bytes to text]
+    D --> P[SSE parser<br/>text to events]
+    P --> R[React state<br/>events to screen]
+```
+
+### 11.1 Why each stage exists
+
+- **TextDecoderStream:** text travels as bytes. Characters like `é` or an emoji take several bytes, and a chunk can end in the middle of one. The streaming decoder holds the half character until the rest arrives.
+- **SSE parser (`lib/sse.ts`):** chunks are cut wherever the network felt like it, not at event boundaries. The parser keeps the unfinished part in a buffer and only returns complete events.
+
+```
+chunk 1:  event: delta\ndata: "Hel
+chunk 2:  lo"\n\n
+parser:   nothing yet ... then { event: "delta", data: "\"Hello\"" }
+```
+
+- **React state:** each `delta` is appended to the last message with a *functional update*, `setMessages(prev => ...)`. Pieces can arrive faster than React re-renders; building on `prev` guarantees none is lost.
+
+### 11.2 The model has no memory
+
+Every Send posts the **whole conversation**, not just the new message. The
+model remembers nothing between calls, so the history has to travel with
+each request. In D2 the history moves into Postgres.
+
+Seen in the browser test on 2026-09-10:
+
+```
+turn 1   "what is RAG?"                    48 tokens in
+turn 2   "say it so a child understands"  126 tokens in   <- turn 1 + its answer + turn 2
+```
+
+The model understood "it" only because turn 1 was sent again. It also
+means **every turn costs more than the last**: long chats get expensive.
+That is one reason chat history gets trimmed or summarized in later
+deliverables.
+
+### 11.3 How failures look on the page
+
+| What happened | What the user sees |
+|---|---|
+| 503, model busy | "The model is busy. Try again in a few seconds." |
+| any other error before streaming | the API's message, or "Request failed (HTTP n)" |
+| error event mid-answer | red banner, the partial answer stays on screen |
+| a turn that failed with no text | dropped from the history, so the next Send is not rejected |
+
+### 11.4 Small things that make it usable
+
+- Enter sends, Shift+Enter adds a line; no sending while an input method (Chinese, Japanese) is composing.
+- `aria-live="polite"`: screen readers read new text as it arrives. `role="alert"` on errors.
+- The list scrolls to the newest words automatically (`useEffect` on `messages`).
+
+Docs: https://developer.mozilla.org/en-US/docs/Web/API/TextDecoderStream
+and https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state
+
+---
+
 ## Check yourself
 
 1. A request with no `X-Tenant-Id` header gets which status, and does Bedrock get called?
@@ -371,3 +558,8 @@ Docs: https://github.com/kludex/uvicorn/blob/main/docs/settings.md
 3. What separates one SSE event from the next?
 4. Why is `chat` a `def` and not an `async def`?
 5. What is the difference between FastAPI and uvicorn?
+6. Which file makes the URL `/api/chat` exist?
+7. Why does `Chat.tsx` start with `"use client"` and `page.tsx` does not?
+8. Why does the browser not call FastAPI directly?
+9. Why does the SSE parser keep a buffer between chunks?
+10. Why is the whole conversation sent on every message?

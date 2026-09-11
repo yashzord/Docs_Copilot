@@ -100,10 +100,13 @@ uv run mypy .               3. typecheck
 uv run pytest               4. tests
 uv run uvicorn app.main:app --reload    start the API on http://localhost:8000
 
-# frontend
+# frontend (first time: cp .env.example .env.local, set API_URL to the backend's port)
 cd frontend
-npm run dev                 start the web page
+npm install                 install packages (first time, or after package.json changes)
+npm run dev                 start the web page on http://localhost:3000
+npm run lint                lint
 npm run typecheck           check types
+npm test                    stream parser tests
 
 # everything at once, from the repo root
 docker compose up --build
@@ -114,7 +117,10 @@ docker compose up --build
 ## 3. Folder map
 
 ```
-frontend/            web page (Next.js, TypeScript)
+frontend/            web page (Next.js, TypeScript, Tailwind)
+  app/               pages and the /api/chat proxy route                D1
+  components/        UI pieces: the chat window                         D1
+  lib/               plain helpers: the stream parser + its tests       D1
 backend/             one Python project: pyproject.toml, uv.lock, .env
   app/               the API server (FastAPI); later the worker too    D1+
   tests/             pytest tests                                       D1+

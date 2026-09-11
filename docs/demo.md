@@ -14,9 +14,11 @@ to do if a step is slow. Written for the demo on 2026-09-12.
 | 3. Start the backend | `cd backend && uv run uvicorn app.main:app --port 8001` | `Uvicorn running on http://127.0.0.1:8001` |
 | 4. Start the page | `cd frontend && npm run dev` | `Local: http://localhost:3000` |
 | 5. Open the page and the map | http://localhost:3000 and the interactive map (link in `docs/learning/README.md`) | the chat page, empty; the map |
-| 6. Warm-up question (not shown) | ask "What is this project?" | an answer with source cards. The first call wakes everything up |
+| 6. Load the starting documents | **Upload a file**: `README.md` (repo root), wait for "Ready to ask", then `docs/learning/aws.md`, wait again | both listed under Documents; "The graph is updating in the background too" |
+| 7. Warm-up question (not shown) | ask "What is this project?" | an answer with source cards. The first call wakes everything up |
 
-Have `docs/learning/ai.md` ready to upload (it is not in the bucket yet).
+The bucket starts empty (fresh start on 2026-09-11), so step 6 is needed.
+Keep `docs/learning/ai.md` for the live upload in the demo itself.
 
 ---
 
@@ -120,4 +122,5 @@ Stop both servers (Ctrl+C in each terminal).
 | every question fails with 502 | AWS credentials expired or wrong profile | `aws sts get-caller-identity --profile docs-copilot-dev` |
 | relationship question errors or says the tool failed | graph not `AVAILABLE` | check step 2; use the document question instead |
 | upload says "Another sync is running" | a sync was already going | wait a minute, it is picked up by the next sync |
-| answer is slow the first time | cold start | that is why step 6 exists |
+| answer is slow the first time | cold start | that is why step 7 exists |
+| "Upload a document on the left" and questions find nothing | the bucket is empty (fresh start) | step 6: upload `README.md` and `aws.md` |

@@ -51,13 +51,29 @@ def list_sessions(
         response = client.list_sessions(
             memoryId=settings.memory_id, actorId=tenant_id, maxResults=100
         )
+        summaries = [
+            SessionSummary(session_id=s["sessionId"], created_at=s["createdAt"])
+            for s in response["sessionSummaries"]
+            if has_events(client, settings.memory_id, tenant_id, s["sessionId"])
+        ]
     except (ClientError, BotoCoreError) as err:
         raise upstream_error(err, "Listing conversations") from err
-    summaries = [
-        SessionSummary(session_id=s["sessionId"], created_at=s["createdAt"])
-        for s in response["sessionSummaries"]
-    ]
     return sorted(summaries, key=lambda s: s.created_at, reverse=True)
+
+
+def has_events(
+    client: "BedrockAgentCoreClient", memory_id: str, actor_id: str, session_id: str
+) -> bool:
+    """False for a conversation whose events were all deleted.
+
+    AgentCore can delete events but not the conversation itself, so a wiped
+    chat stays in the list. The sidebar hides those instead of showing them empty.
+    ponytail: one extra call per conversation. Ceiling: slow with hundreds of chats.
+    """
+    page = client.list_events(
+        memoryId=memory_id, sessionId=session_id, actorId=actor_id, maxResults=1
+    )
+    return bool(page["events"])
 
 
 @router.get("/{session_id}/messages")

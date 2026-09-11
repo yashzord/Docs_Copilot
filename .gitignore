@@ -21,3 +21,6 @@ node_modules/
 .vscode/
 
 test-instance-key.pem
+
+# Playwright MCP browser-test output (snapshots, console logs)
+.playwright-mcp/

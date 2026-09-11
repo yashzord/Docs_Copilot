@@ -61,12 +61,34 @@ def test_lists_this_tenants_sessions_newest_first() -> None:
 
     assert response.status_code == 200
     assert [s["session_id"] for s in response.json()] == ["new", "old"]
-    assert fake.calls == [
-        (
-            "list_sessions",
-            {"memoryId": TEST_SETTINGS.memory_id, "actorId": "dev", "maxResults": 100},
-        )
-    ]
+    assert fake.calls[0] == (
+        "list_sessions",
+        {"memoryId": TEST_SETTINGS.memory_id, "actorId": "dev", "maxResults": 100},
+    )
+
+
+def test_conversations_with_no_events_are_hidden() -> None:
+    # AgentCore can delete a conversation's events but not the conversation itself.
+    fake = FakeAgentCore(
+        sessions=[
+            {"sessionId": "wiped", "actorId": "dev", "createdAt": at(1)},
+            {"sessionId": "real", "actorId": "dev", "createdAt": at(2)},
+        ],
+        empty_sessions=["wiped"],
+    )
+
+    response = client_using(fake).get("/v1/sessions", headers=TENANT)
+
+    assert [s["session_id"] for s in response.json()] == ["real"]
+    assert (
+        "list_events",
+        {
+            "memoryId": TEST_SETTINGS.memory_id,
+            "sessionId": "wiped",
+            "actorId": "dev",
+            "maxResults": 1,
+        },
+    ) in fake.calls
 
 
 def test_messages_keep_only_question_and_answer_text_in_order() -> None:

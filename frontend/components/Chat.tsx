@@ -5,10 +5,10 @@
 // the current conversation), events (typing, clicking) and streaming fetch.
 // https://nextjs.org/docs/app/getting-started/server-and-client-components
 
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, Fragment, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import Sidebar from "@/components/Sidebar";
-import { splitCitations } from "@/lib/citations";
+import { type Inline, parseMarkdown } from "@/lib/markdown";
 import { createSseParser } from "@/lib/sse";
 
 type Source = { n: number; title: string; score: number; excerpt: string };
@@ -241,22 +241,12 @@ function Answer({ message, thinking }: { message: Message; thinking: boolean }) 
         );
       })}
 
-      <div className="whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-white px-4 py-2.5 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
-        {message.content
-          ? splitCitations(message.content).map((piece, i) =>
-              piece.kind === "text" ? (
-                piece.text
-              ) : (
-                <a
-                  key={i}
-                  href={`#source-${piece.n}`}
-                  className="mx-0.5 rounded bg-indigo-100 px-1 text-xs font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
-                >
-                  {piece.n}
-                </a>
-              ),
-            )
-          : thinking && <span className="animate-pulse text-zinc-400">Thinking...</span>}
+      <div className="flex flex-col gap-2 rounded-2xl rounded-bl-sm bg-white px-4 py-2.5 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
+        {message.content ? (
+          <Markdown source={message.content} />
+        ) : (
+          thinking && <span className="animate-pulse text-zinc-400">Thinking...</span>
+        )}
       </div>
 
       {message.sources && message.sources.length > 0 && (
@@ -284,19 +274,71 @@ function Answer({ message, thinking }: { message: Message; thinking: boolean }) 
   );
 }
 
+/** The answer's markdown as page elements. Parsing lives in lib/markdown.ts. */
+function Markdown({ source }: { source: string }) {
+  return parseMarkdown(source).map((block, i) => {
+    if (block.kind === "item") {
+      return (
+        <div key={i} className="flex gap-2" style={{ paddingLeft: `${block.depth * 1.25}rem` }}>
+          <span className="shrink-0 text-zinc-500">{block.marker}</span>
+          <span>
+            <Pieces inline={block.inline} />
+          </span>
+        </div>
+      );
+    }
+    return (
+      <p key={i} className={block.kind === "h" ? "font-semibold" : undefined}>
+        <Pieces inline={block.inline} />
+      </p>
+    );
+  });
+}
+
+/** Bold, code and citation markers inside one block. [1] links to source card 1. */
+function Pieces({ inline }: { inline: Inline[] }) {
+  return inline.map((piece, i) => {
+    if (piece.kind === "bold") return <strong key={i}>{piece.text}</strong>;
+    if (piece.kind === "code") {
+      return (
+        <code key={i} className="rounded bg-zinc-100 px-1 text-[0.9em] dark:bg-zinc-800">
+          {piece.text}
+        </code>
+      );
+    }
+    if (piece.kind === "cite") {
+      return (
+        <a
+          key={i}
+          href={`#source-${piece.n}`}
+          className="mx-0.5 rounded bg-indigo-100 px-1 text-xs font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+        >
+          {piece.n}
+        </a>
+      );
+    }
+    return <Fragment key={i}>{piece.text}</Fragment>;
+  });
+}
+
 /** One line per tool call for the trace above an answer, or null to hide it. */
 function describeTool(tool: ToolCall): string | null {
   const input = tool.input as {
     retrievalQuery?: { text?: string };
+    query?: string;
     browser_input?: { action?: { type?: string; url?: string } };
   } | null;
-  const query = input?.retrievalQuery?.text;
-  if (query) return `Searched your documents for "${query}"`;
-  const action = input?.browser_input?.action;
-  if (action) {
+  const docsQuery = input?.retrievalQuery?.text;
+  if (docsQuery) return `Searched your documents for "${docsQuery}"`;
+  if (tool.name.startsWith("graph___") && input?.query) {
+    return `Searched the knowledge graph for "${input.query}"`;
+  }
+  if (tool.name === "browser" || input?.browser_input) {
     // A page read is several browser steps (open session, navigate, read text,
-    // close). Only "navigate" says something useful: which page.
-    return action.type === "navigate" && action.url ? `Opened ${action.url}` : null;
+    // close). Only "navigate" says something useful: which page. Steps whose
+    // input did not arrive as JSON are hidden too.
+    const action = input?.browser_input?.action;
+    return action?.type === "navigate" && action.url ? `Opened ${action.url}` : null;
   }
   return `Used ${tool.name}`;
 }

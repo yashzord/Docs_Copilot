@@ -40,12 +40,15 @@ class FakeAgentCore:
         self,
         stream: Iterable[dict[str, Any]] = (),
         sessions: Iterable[dict[str, Any]] = (),
-        event_pages: Iterable[list[dict[str, Any]]] = ([],),
+        event_pages: Iterable[list[dict[str, Any]]] = ([{"eventId": "e0"}],),
         error: ClientError | None = None,
+        empty_sessions: Iterable[str] = (),
     ) -> None:
         self.stream = stream
         self.sessions = list(sessions)
         self.event_pages = list(event_pages)
+        # Conversations whose events were deleted: list_events returns nothing for them.
+        self.empty_sessions = set(empty_sessions)
         self.error = error
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -64,6 +67,8 @@ class FakeAgentCore:
 
     def list_events(self, **kwargs: Any) -> dict[str, Any]:
         self._record("list_events", kwargs)
+        if kwargs.get("sessionId") in self.empty_sessions:
+            return {"events": []}
         page = int(kwargs.get("nextToken", 0))
         response: dict[str, Any] = {"events": self.event_pages[page]}
         if page + 1 < len(self.event_pages):

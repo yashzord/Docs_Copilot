@@ -1,5 +1,11 @@
 # Start here
 
+**Read [`course.md`](course.md).** It is the one guided path: 20 lessons in
+order, each with the idea, where it lives in our system, how to see it for
+real in the console and terminal, and questions to check yourself. The
+levels below are the older map of the same material; the course links into
+them as it goes.
+
 A learning path through Docs Copilot, written for someone new to coding and
 new to AWS. It goes from the whole picture down to the details, so every new
 thing has a place to hang.

@@ -1,6 +1,7 @@
 """Small helpers shared by the test files."""
 
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -40,7 +41,9 @@ class FakeAgentCore:
         self,
         stream: Iterable[dict[str, Any]] = (),
         sessions: Iterable[dict[str, Any]] = (),
-        event_pages: Iterable[list[dict[str, Any]]] = ([{"eventId": "e0"}],),
+        event_pages: Iterable[list[dict[str, Any]]] = (
+            [{"eventId": "e0", "eventTimestamp": datetime(2026, 9, 11, tzinfo=UTC), "payload": []}],
+        ),
         error: ClientError | None = None,
         empty_sessions: Iterable[str] = (),
     ) -> None:

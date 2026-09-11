@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     s3_bucket: str
     kb_id: str
     kb_data_source_id: str
+    # The GraphRAG Knowledge Base over the same bucket (D4). Uploads sync it too.
+    graph_kb_id: str
+    graph_data_source_id: str
 
     # The agent (AgentCore Harness) and the memory that keeps its conversations.
     harness_arn: str

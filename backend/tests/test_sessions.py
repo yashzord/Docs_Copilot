@@ -61,6 +61,7 @@ def test_lists_this_tenants_sessions_newest_first() -> None:
 
     assert response.status_code == 200
     assert [s["session_id"] for s in response.json()] == ["new", "old"]
+    assert response.json()[0]["title"] == "Untitled chat"
     assert fake.calls[0] == (
         "list_sessions",
         {"memoryId": TEST_SETTINGS.memory_id, "actorId": "dev", "maxResults": 100},
@@ -86,9 +87,36 @@ def test_conversations_with_no_events_are_hidden() -> None:
             "memoryId": TEST_SETTINGS.memory_id,
             "sessionId": "wiped",
             "actorId": "dev",
-            "maxResults": 1,
+            "includePayloads": True,
+            "maxResults": 100,
         },
     ) in fake.calls
+
+
+def test_title_is_the_first_question() -> None:
+    # Out of order on purpose: the earliest user message wins.
+    fake = FakeAgentCore(
+        sessions=[{"sessionId": SESSION, "actorId": "dev", "createdAt": at(1)}],
+        event_pages=[[TURN[3], BLOB, TURN[1], TURN[0], TURN[2]]],
+    )
+
+    response = client_using(fake).get("/v1/sessions", headers=TENANT)
+
+    assert response.json()[0]["title"] == "Why was Neptune dropped?"
+
+
+def test_long_title_is_shortened() -> None:
+    question = "How does the Gateway relate to Memory and the Harness in this whole project?"
+    fake = FakeAgentCore(
+        sessions=[{"sessionId": SESSION, "actorId": "dev", "createdAt": at(1)}],
+        event_pages=[[memory_event(1, "user", [{"text": question}])]],
+    )
+
+    title = client_using(fake).get("/v1/sessions", headers=TENANT).json()[0]["title"]
+
+    assert len(title) <= 60
+    assert title.endswith("...")
+    assert question.startswith(title[:-3])
 
 
 def test_messages_keep_only_question_and_answer_text_in_order() -> None:

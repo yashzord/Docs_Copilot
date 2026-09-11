@@ -17,7 +17,9 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   tools?: ToolCall[]; // what the agent did before answering
-  sources?: Source[]; // what its [1], [2] markers point to
+  // One list per search. The model numbers passages per search, so [1], [2]
+  // point into the latest list.
+  sources?: Source[][];
 };
 type Usage = { input_tokens: number; output_tokens: number; model_calls: number };
 
@@ -85,7 +87,8 @@ export default function Chat() {
             const call = payload as ToolCall;
             updateAnswer((a) => ({ ...a, tools: [...(a.tools ?? []), call] }));
           } else if (event === "sources") {
-            updateAnswer((a) => ({ ...a, sources: payload as Source[] }));
+            const group = payload as Source[];
+            updateAnswer((a) => ({ ...a, sources: [...(a.sources ?? []), group] }));
           } else if (event === "delta") {
             updateAnswer((a) => ({ ...a, content: a.content + (payload as string) }));
           } else if (event === "usage") {
@@ -249,14 +252,18 @@ function Answer({ message, thinking }: { message: Message; thinking: boolean }) 
         )}
       </div>
 
-      {message.sources && message.sources.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {message.sources.map((source) => (
+      {message.sources?.map((group, g, groups) => (
+        <div key={g} className="flex flex-col gap-1">
+          {/* A label only when the agent searched more than once in this answer. */}
+          {groups.length > 1 && <p className="text-xs font-medium text-zinc-500">Search {g + 1}</p>}
+          {group.map((source) => (
             // <details> opens and closes on click with no JavaScript.
-            // ponytail: ids repeat across answers, so a marker jumps to the first match.
+            // ponytail: only the latest search's cards get ids, since [n] means the
+            // latest search; ids still repeat across answers, so a marker jumps to the
+            // first match on the page.
             <details
               key={source.n}
-              id={`source-${source.n}`}
+              id={g === groups.length - 1 ? `source-${source.n}` : undefined}
               className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
             >
               <summary className="cursor-pointer">
@@ -269,7 +276,7 @@ function Answer({ message, thinking }: { message: Message; thinking: boolean }) 
             </details>
           ))}
         </div>
-      )}
+      ))}
     </div>
   );
 }

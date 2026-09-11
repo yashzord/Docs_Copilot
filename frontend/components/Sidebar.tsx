@@ -5,7 +5,8 @@
 
 import { type ChangeEvent, useEffect, useState } from "react";
 
-type Session = { session_id: string; created_at: string };
+// title: the chat's first question, made by the backend. Older chats may have none.
+type Session = { session_id: string; created_at: string; title?: string | null };
 type Doc = { name: string; size: number; last_modified: string };
 type Sync = { status: string; scanned: number; indexed: number; failed: number };
 
@@ -56,17 +57,24 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
       const form = new FormData();
       form.append("file", file);
       const response = await fetch("/api/documents", { method: "POST", body: form });
-      const body = (await response.json()) as { ingestion_job_id?: string | null; detail?: string };
+      const body = (await response.json()) as {
+        ingestion_job_id?: string | null;
+        graph_ingestion_job_id?: string | null;
+        detail?: string;
+      };
       if (!response.ok) {
         setNote(body.detail ?? `Upload failed (HTTP ${response.status}).`);
         return;
       }
       await loadDocs();
+      // The graph Knowledge Base syncs too. It is not polled: it only matters for
+      // relationship questions, and the note says it is still updating.
+      const graphNote = body.graph_ingestion_job_id ? " The graph is updating in the background too." : "";
       if (!body.ingestion_job_id) {
-        setNote("Uploaded. Another sync is running, so this file is indexed by the next one.");
+        setNote(`Uploaded. Another sync is running, so this file is indexed by the next one.${graphNote}`);
         return;
       }
-      await watchSync(body.ingestion_job_id);
+      await watchSync(body.ingestion_job_id, graphNote);
     } catch {
       setNote("Upload failed. Is the backend running?");
     } finally {
@@ -74,7 +82,7 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
     }
   }
 
-  async function watchSync(jobId: string) {
+  async function watchSync(jobId: string, graphNote: string) {
     // ponytail: polls every 5 seconds. Fine for one user; a push channel scales better.
     while (true) {
       const sync = await getJson<Sync>(`/api/documents/sync/${jobId}`);
@@ -85,7 +93,7 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
       if (SYNC_DONE.has(sync.status)) {
         setNote(
           sync.status === "COMPLETE"
-            ? `Ready to ask: ${sync.indexed} indexed, ${sync.failed} failed.`
+            ? `Ready to ask: ${sync.indexed} indexed, ${sync.failed} failed.${graphNote}`
             : `Sync ${sync.status.toLowerCase()}.`,
         );
         return;
@@ -118,8 +126,12 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
               s.session_id === activeSessionId ? "bg-zinc-200 dark:bg-zinc-800" : ""
             }`}
           >
-            {/* ponytail: Memory stores no titles, so the time is the label. */}
-            {new Date(s.created_at).toLocaleString()}
+            <span className="block truncate" title={s.title ?? undefined}>
+              {s.title || new Date(s.created_at).toLocaleString()}
+            </span>
+            {s.title && (
+              <span className="block text-xs text-zinc-500">{new Date(s.created_at).toLocaleString()}</span>
+            )}
           </button>
         ))}
       </section>

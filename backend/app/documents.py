@@ -51,6 +51,8 @@ class Uploaded(BaseModel):
     key: str
     # None when another sync was already running.
     ingestion_job_id: str | None
+    # The same for the graph Knowledge Base. Also None if its sync could not start.
+    graph_ingestion_job_id: str | None
 
 
 class Document(BaseModel):
@@ -84,13 +86,11 @@ def safe_filename(raw: str | None) -> str:
     return name
 
 
-def start_sync(kb: "AgentsforBedrockClient", settings: Settings) -> str | None:
-    """Ask the Knowledge Base to scan the bucket again. Returns the job id, or None if busy."""
+def start_sync(kb: "AgentsforBedrockClient", kb_id: str, data_source_id: str) -> str | None:
+    """Ask a Knowledge Base to scan the bucket again. Returns the job id, or None if busy."""
     try:
         # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agent/client/start_ingestion_job.html
-        response = kb.start_ingestion_job(
-            knowledgeBaseId=settings.kb_id, dataSourceId=settings.kb_data_source_id
-        )
+        response = kb.start_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=data_source_id)
     except ClientError as err:
         if err.response.get("Error", {}).get("Code") in _SYNC_BUSY_CODES:
             # ponytail: the upload is kept but not indexed until the next sync starts.
@@ -145,7 +145,16 @@ def upload(
         raise upstream_error(err, "Upload") from err
 
     logger.info("document uploaded tenant=%s bytes=%d", tenant_id, file.size)
-    return Uploaded(key=key, ingestion_job_id=start_sync(kb, settings))
+    job_id = start_sync(kb, settings.kb_id, settings.kb_data_source_id)
+    # Both Knowledge Bases read the same bucket, but each only sees new files after
+    # its own sync. The graph sync is best effort: the file and the main sync
+    # already worked, so a failure here is logged, not returned as an error.
+    try:
+        graph_job_id = start_sync(kb, settings.graph_kb_id, settings.graph_data_source_id)
+    except HTTPException:
+        logger.warning("graph sync not started; the file reaches graph search at its next sync")
+        graph_job_id = None
+    return Uploaded(key=key, ingestion_job_id=job_id, graph_ingestion_job_id=graph_job_id)
 
 
 @router.get("")

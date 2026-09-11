@@ -27,18 +27,30 @@ if TYPE_CHECKING:
 BUCKET = TEST_SETTINGS.s3_bucket
 
 
-class FakeKb:
-    """Stands in for the bedrock-agent client: records calls, returns canned answers."""
+JOB_IDS = {TEST_SETTINGS.kb_id: "JOB0000001", TEST_SETTINGS.graph_kb_id: "GRAPH00001"}
 
-    def __init__(self, error: ClientError | None = None) -> None:
+
+class FakeKb:
+    """Stands in for the bedrock-agent client: records calls, returns canned answers.
+
+    `error` fails every sync start; `graph_error` fails only the graph Knowledge Base's.
+    """
+
+    def __init__(
+        self, error: ClientError | None = None, graph_error: ClientError | None = None
+    ) -> None:
         self.error = error
+        self.graph_error = graph_error
         self.calls: list[dict[str, Any]] = []
 
     def start_ingestion_job(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return {"ingestionJob": {"ingestionJobId": "JOB0000001", "status": "STARTING"}}
+        if self.graph_error is not None and kwargs["knowledgeBaseId"] == TEST_SETTINGS.graph_kb_id:
+            raise self.graph_error
+        job_id = JOB_IDS[kwargs["knowledgeBaseId"]]
+        return {"ingestionJob": {"ingestionJobId": job_id, "status": "STARTING"}}
 
     def get_ingestion_job(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
@@ -90,20 +102,27 @@ def read_json(s3: "S3Client", key: str) -> Any:
 # ---------- upload: happy path ----------
 
 
-def test_upload_writes_file_and_tenant_label_then_starts_sync(s3: "S3Client") -> None:
+def test_upload_writes_file_and_tenant_label_then_starts_both_syncs(s3: "S3Client") -> None:
     kb = FakeKb()
 
     response = upload(client_using(s3, kb), "hand book.md")
 
     assert response.status_code == 201
-    assert response.json() == {"key": "tenants/dev/hand_book.md", "ingestion_job_id": "JOB0000001"}
+    assert response.json() == {
+        "key": "tenants/dev/hand_book.md",
+        "ingestion_job_id": "JOB0000001",
+        "graph_ingestion_job_id": "GRAPH00001",
+    }
     assert (
         s3.get_object(Bucket=BUCKET, Key="tenants/dev/hand_book.md")["Body"].read() == b"# Handbook"
     )
     assert read_json(s3, "tenants/dev/hand_book.md.metadata.json") == {
         "metadataAttributes": {"tenant_id": "dev"}
     }
-    assert kb.calls == [{"knowledgeBaseId": "KB00000000", "dataSourceId": "DS00000000"}]
+    assert kb.calls == [
+        {"knowledgeBaseId": "KB00000000", "dataSourceId": "DS00000000"},
+        {"knowledgeBaseId": "GKB0000000", "dataSourceId": "GDS0000000"},
+    ]
 
 
 def test_upload_while_a_sync_runs_keeps_the_file_without_a_job(s3: "S3Client") -> None:
@@ -113,6 +132,28 @@ def test_upload_while_a_sync_runs_keeps_the_file_without_a_job(s3: "S3Client") -
 
     assert response.status_code == 201
     assert response.json()["ingestion_job_id"] is None
+    assert response.json()["graph_ingestion_job_id"] is None
+    assert s3.head_object(Bucket=BUCKET, Key="tenants/dev/a.md")
+
+
+def test_graph_sync_busy_leaves_the_main_sync_running(s3: "S3Client") -> None:
+    kb = FakeKb(graph_error=aws_error("ConflictException"))
+
+    response = upload(client_using(s3, kb), "a.md")
+
+    assert response.status_code == 201
+    assert response.json()["ingestion_job_id"] == "JOB0000001"
+    assert response.json()["graph_ingestion_job_id"] is None
+
+
+def test_graph_sync_refused_does_not_fail_the_upload(s3: "S3Client") -> None:
+    kb = FakeKb(graph_error=aws_error("AccessDeniedException"))
+
+    response = upload(client_using(s3, kb), "a.md")
+
+    assert response.status_code == 201
+    assert response.json()["ingestion_job_id"] == "JOB0000001"
+    assert response.json()["graph_ingestion_job_id"] is None
     assert s3.head_object(Bucket=BUCKET, Key="tenants/dev/a.md")
 
 

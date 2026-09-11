@@ -18,6 +18,8 @@ TEST_SETTINGS = Settings(
     s3_bucket="test-bucket",
     kb_id="KB00000000",
     kb_data_source_id="DS00000000",
+    graph_kb_id="GKB0000000",
+    graph_data_source_id="GDS0000000",
     harness_arn="arn:aws:bedrock-agentcore:us-west-2:000000000000:harness/test",
     memory_id="test-memory",
 )

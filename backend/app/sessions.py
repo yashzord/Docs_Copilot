@@ -32,6 +32,8 @@ router = APIRouter(prefix="/v1/sessions")
 class SessionSummary(BaseModel):
     session_id: str
     created_at: datetime
+    # The first question, shortened: the sidebar's label for the conversation.
+    title: str
 
 
 class ChatMessage(BaseModel):
@@ -52,28 +54,47 @@ def list_sessions(
             memoryId=settings.memory_id, actorId=tenant_id, maxResults=100
         )
         summaries = [
-            SessionSummary(session_id=s["sessionId"], created_at=s["createdAt"])
+            SessionSummary(session_id=s["sessionId"], created_at=s["createdAt"], title=title)
             for s in response["sessionSummaries"]
-            if has_events(client, settings.memory_id, tenant_id, s["sessionId"])
+            if (title := session_title(client, settings.memory_id, tenant_id, s["sessionId"]))
         ]
     except (ClientError, BotoCoreError) as err:
         raise upstream_error(err, "Listing conversations") from err
     return sorted(summaries, key=lambda s: s.created_at, reverse=True)
 
 
-def has_events(
-    client: "BedrockAgentCoreClient", memory_id: str, actor_id: str, session_id: str
-) -> bool:
-    """False for a conversation whose events were all deleted.
+TITLE_CHARS = 60
 
-    AgentCore can delete events but not the conversation itself, so a wiped
-    chat stays in the list. The sidebar hides those instead of showing them empty.
-    ponytail: one extra call per conversation. Ceiling: slow with hundreds of chats.
+
+def session_title(
+    client: "BedrockAgentCoreClient", memory_id: str, actor_id: str, session_id: str
+) -> str | None:
+    """The conversation's first question as a short title, or None if it has no events.
+
+    None hides the conversation: AgentCore can delete events but not the
+    conversation itself, so a wiped chat would otherwise show up empty.
+    ponytail: one extra call per conversation, first page only. Ceiling: slow
+    with hundreds of chats, and a chat over 100 events may miss its first
+    question. Upgrade: store titles when a chat starts.
     """
-    page = client.list_events(
-        memoryId=memory_id, sessionId=session_id, actorId=actor_id, maxResults=1
-    )
-    return bool(page["events"])
+    events = client.list_events(
+        memoryId=memory_id,
+        sessionId=session_id,
+        actorId=actor_id,
+        includePayloads=True,
+        maxResults=100,
+    )["events"]
+    if not events:
+        return None
+    for event in sorted(events, key=lambda e: e["eventTimestamp"]):
+        for item in event.get("payload", []):
+            message = to_chat_message(item)
+            if message is not None and message.role == "user":
+                text = " ".join(message.text.split())
+                if len(text) <= TITLE_CHARS:
+                    return text
+                return text[: TITLE_CHARS - 3].rstrip() + "..."
+    return "Untitled chat"
 
 
 @router.get("/{session_id}/messages")

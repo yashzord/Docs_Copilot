@@ -1,0 +1,45 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "KnowledgeBaseUse",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:Retrieve",
+        "bedrock:StartIngestionJob",
+        "bedrock:GetIngestionJob",
+        "bedrock:ListIngestionJobs",
+        "bedrock:GetKnowledgeBase",
+        "bedrock:ListKnowledgeBases",
+        "bedrock:ListDataSources",
+        "bedrock:GetDataSource"
+      ],
+      "Resource": "arn:aws:bedrock:us-west-2:901708383582:knowledge-base/*"
+    },
+    {
+      "Sid": "ListKnowledgeBases",
+      "Effect": "Allow",
+      "Action": ["bedrock:ListKnowledgeBases"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DocumentsBucketObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::docs-copilot-901708383582/*"
+    },
+    {
+      "Sid": "DocumentsBucketRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketVersioning",
+        "s3:GetBucketOwnershipControls"
+      ],
+      "Resource": "arn:aws:s3:::docs-copilot-901708383582"
+    }
+  ]
+}

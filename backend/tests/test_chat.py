@@ -1,200 +1,267 @@
 """Tests for POST /v1/chat.
 
-Bedrock is replaced by FakeBedrock, so tests need no network, no AWS account,
-and cost nothing. Each test covers one behavior: the happy path, or one way
-things go wrong.
+The harness is replaced by FakeAgentCore, so tests need no network, no AWS
+account, and cost nothing. The event shapes copy a real InvokeHarness stream
+captured on 2026-09-11 (docs/learning/D2.md), shortened.
 """
 
 import json
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
-from app.llm import get_bedrock_client
+from app.aws import get_agentcore
 from app.main import app
-from app.settings import Settings, get_settings
+from tests.conftest import TEST_SETTINGS
+from tests.helpers import TENANT, FakeAgentCore, aws_error, parse_sse
 
-TENANT = {"X-Tenant-Id": "dev"}
-ONE_QUESTION = {"messages": [{"role": "user", "content": "hi"}]}
+SESSION = "s" * 40
+RESULT = json.dumps(
+    {
+        "retrievalResults": [
+            {
+                "content": {"text": "Neptune costs $3.51 an hour", "type": "TEXT"},
+                "metadata": {"_document_title": "README.md", "tenant_id": "dev"},
+                "score": 0.61234,
+            }
+        ]
+    }
+)
 
-# The event sequence Bedrock sends for a two-piece answer.
-# Shapes from the ConverseStream response syntax:
-# https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-runtime/client/converse_stream.html
+
+def usage(inputs: int, outputs: int) -> dict[str, Any]:
+    return {
+        "metadata": {
+            "usage": {"inputTokens": inputs, "outputTokens": outputs},
+            "metrics": {"latencyMs": 900},
+        }
+    }
+
+
+# One question, one search, one answer: two model calls.
 HAPPY_EVENTS: list[dict[str, Any]] = [
     {"messageStart": {"role": "assistant"}},
-    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Hel"}}},
-    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "lo"}}},
-    {"contentBlockStop": {"contentBlockIndex": 0}},
-    {"messageStop": {"stopReason": "end_turn"}},
     {
-        "metadata": {
-            "usage": {"inputTokens": 5, "outputTokens": 2, "totalTokens": 7},
-            "metrics": {"latencyMs": 120},
+        "contentBlockDelta": {
+            "contentBlockIndex": 1,
+            "delta": {"reasoningContent": {"text": "search first"}},
         }
     },
+    {"contentBlockStop": {"contentBlockIndex": 1}},
+    {
+        "contentBlockStart": {
+            "contentBlockIndex": 2,
+            "start": {"toolUse": {"toolUseId": "t1", "name": "docs___Retrieve"}},
+        }
+    },
+    {
+        "contentBlockDelta": {
+            "contentBlockIndex": 2,
+            "delta": {"toolUse": {"input": '{"retrievalQuery": '}},
+        }
+    },
+    {
+        "contentBlockDelta": {
+            "contentBlockIndex": 2,
+            "delta": {"toolUse": {"input": '{"text": "neptune"}}'}},
+        }
+    },
+    {"contentBlockStop": {"contentBlockIndex": 2}},
+    {"messageStop": {"stopReason": "tool_use"}},
+    usage(300, 80),
+    {"messageStart": {"role": "user"}},
+    {
+        "contentBlockStart": {
+            "contentBlockIndex": 0,
+            "start": {"toolResult": {"toolUseId": "t1", "status": "success"}},
+        }
+    },
+    # The result arrives as pieces of one JSON string.
+    {
+        "contentBlockDelta": {
+            "contentBlockIndex": 0,
+            "delta": {"toolResult": [{"text": RESULT[:40]}]},
+        }
+    },
+    {
+        "contentBlockDelta": {
+            "contentBlockIndex": 0,
+            "delta": {"toolResult": [{"text": RESULT[40:]}]},
+        }
+    },
+    {"contentBlockStop": {"contentBlockIndex": 0}},
+    {"messageStop": {"stopReason": "tool_result"}},
+    {"messageStart": {"role": "assistant"}},
+    {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "Cost"}}},
+    {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": " [1]"}}},
+    {"contentBlockStop": {"contentBlockIndex": 1}},
+    {"messageStop": {"stopReason": "end_turn"}},
+    usage(3000, 200),
 ]
 
 
-def aws_error(code: str) -> ClientError:
-    """The exception boto3 raises when AWS answers with an error."""
-    return ClientError({"Error": {"Code": code, "Message": "test"}}, "ConverseStream")
-
-
-class FakeBedrock:
-    """Stands in for the boto3 client.
-
-    botocore's Stubber would be the usual tool, but it cannot fake an event
-    stream (it rejects a plain list), so tests inject this object through
-    FastAPI's dependency overrides instead.
-    https://fastapi.tiangolo.com/advanced/testing-dependencies/
-    """
-
-    def __init__(
-        self, stream: Iterable[dict[str, Any]] = (), error: ClientError | None = None
-    ) -> None:
-        self.stream = stream
-        self.error = error
-        self.calls: list[dict[str, Any]] = []
-
-    def converse_stream(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
-        if self.error is not None:
-            raise self.error
-        return {"stream": self.stream}
-
-
-@pytest.fixture(autouse=True)
-def _test_settings() -> Iterator[None]:
-    # _env_file=None: ignore backend/.env, so tests behave the same on every machine.
-    app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, bedrock_synth_model_id="test-model"
-    )
-    yield
-    app.dependency_overrides.clear()
-
-
-def client_using(fake: FakeBedrock) -> TestClient:
-    app.dependency_overrides[get_bedrock_client] = lambda: fake
+def client_using(fake: FakeAgentCore) -> TestClient:
+    app.dependency_overrides[get_agentcore] = lambda: fake
     return TestClient(app)
 
 
-def parse_sse(body: str) -> list[tuple[str, str]]:
-    """Turn an SSE body into (event, data) pairs. Comment lines (keep-alive pings) are skipped."""
-    events = []
-    for block in body.strip().split("\n\n"):
-        fields = {}
-        for line in block.splitlines():
-            if line.startswith(":"):
-                continue
-            key, _, value = line.partition(":")
-            fields[key] = value.removeprefix(" ")
-        if fields:
-            events.append((fields.get("event", "message"), fields.get("data", "")))
-    return events
+def ask(
+    fake: FakeAgentCore, body: dict[str, Any] | None = None, headers: dict[str, str] = TENANT
+) -> Any:
+    return client_using(fake).post("/v1/chat", headers=headers, json=body or {"message": "why?"})
 
 
 # ---------- happy path ----------
 
 
-def test_streams_text_then_usage_then_done() -> None:
-    fake = FakeBedrock(stream=HAPPY_EVENTS)
-
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json=ONE_QUESTION)
+def test_streams_session_tool_sources_answer_usage_done() -> None:
+    response = ask(FakeAgentCore(stream=HAPPY_EVENTS), {"message": "why?", "session_id": SESSION})
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
     events = parse_sse(response.text)
-    assert events[:2] == [("delta", '"Hel"'), ("delta", '"lo"')]
-    assert events[2][0] == "usage"
-    assert json.loads(events[2][1]) == {"input_tokens": 5, "output_tokens": 2, "latency_ms": 120}
-    assert events[3] == ("done", "[DONE]")
+    assert [name for name, _ in events] == [
+        "session",
+        "tool",
+        "sources",
+        "delta",
+        "delta",
+        "usage",
+        "done",
+    ]
+    data = [json.loads(d) if name != "done" else d for name, d in events]
+    assert data[0] == {"session_id": SESSION}
+    assert data[1] == {"name": "docs___Retrieve", "input": {"retrievalQuery": {"text": "neptune"}}}
+    assert data[2] == [
+        {"n": 1, "title": "README.md", "score": 0.612, "excerpt": "Neptune costs $3.51 an hour"}
+    ]
+    assert data[3:5] == ["Cost", " [1]"]
+    assert data[5] == {"input_tokens": 3300, "output_tokens": 280, "model_calls": 2}
 
 
-def test_sends_bedrock_the_converse_request_shape() -> None:
-    fake = FakeBedrock(stream=HAPPY_EVENTS)
+def test_sends_the_harness_session_tenant_and_message() -> None:
+    fake = FakeAgentCore(stream=HAPPY_EVENTS)
 
-    client_using(fake).post("/v1/chat", headers=TENANT, json=ONE_QUESTION)
+    ask(fake, {"message": "why?", "session_id": SESSION})
 
     assert fake.calls == [
-        {
-            "modelId": "test-model",
-            "messages": [{"role": "user", "content": [{"text": "hi"}]}],
-            "inferenceConfig": {"maxTokens": 1024},
-        }
+        (
+            "invoke_harness",
+            {
+                "harnessArn": TEST_SETTINGS.harness_arn,
+                "runtimeSessionId": SESSION,
+                "actorId": "dev",
+                "messages": [{"role": "user", "content": [{"text": "why?"}]}],
+            },
+        )
     ]
 
 
-# ---------- rejected before Bedrock is called ----------
+def test_new_conversation_gets_a_fresh_session_id() -> None:
+    fake = FakeAgentCore(stream=HAPPY_EVENTS)
+
+    events = parse_sse(ask(fake).text)
+
+    session_id = json.loads(events[0][1])["session_id"]
+    assert len(session_id) == 36
+    assert fake.calls[0][1]["runtimeSessionId"] == session_id
 
 
-@pytest.mark.parametrize("headers", [{}, {"X-Tenant-Id": "has space"}, {"X-Tenant-Id": "a" * 65}])
+def test_a_tool_result_that_is_not_a_search_gives_no_sources() -> None:
+    stream: list[dict[str, Any]] = [
+        {
+            "contentBlockStart": {
+                "contentBlockIndex": 0,
+                "start": {"toolResult": {"toolUseId": "t", "status": "success"}},
+            }
+        },
+        {
+            "contentBlockDelta": {
+                "contentBlockIndex": 0,
+                "delta": {"toolResult": [{"text": "not json"}]},
+            }
+        },
+        {"contentBlockStop": {"contentBlockIndex": 0}},
+    ]
+
+    events = parse_sse(ask(FakeAgentCore(stream=stream)).text)
+
+    assert "sources" not in [name for name, _ in events]
+
+
+# ---------- rejected before the harness is called ----------
+
+
+@pytest.mark.parametrize(
+    "headers", [{}, {"X-Tenant-Id": "has space"}, {"X-Tenant-Id": "_starts-badly"}]
+)
 def test_bad_tenant_header_is_400_and_costs_nothing(headers: dict[str, str]) -> None:
-    fake = FakeBedrock(stream=HAPPY_EVENTS)
+    fake = FakeAgentCore(stream=HAPPY_EVENTS)
 
-    response = client_using(fake).post("/v1/chat", headers=headers, json=ONE_QUESTION)
+    response = ask(fake, headers=headers)
 
     assert response.status_code == 400
     assert fake.calls == []
 
 
 @pytest.mark.parametrize(
-    "messages",
+    "body",
     [
-        [],
-        [{"role": "assistant", "content": "hi"}],
-        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
-        [{"role": "user", "content": ""}],
-        [{"role": "system", "content": "hi"}],
+        {},
+        {"message": ""},
+        {"message": "hi", "session_id": "too-short"},
+        {"message": "hi", "session_id": "has spaces " * 4},
     ],
-    ids=["empty", "starts-with-assistant", "ends-with-assistant", "empty-text", "unknown-role"],
+    ids=["no-message", "empty-message", "short-session", "bad-session-chars"],
 )
-def test_invalid_conversation_is_422_and_costs_nothing(messages: list[dict[str, str]]) -> None:
-    fake = FakeBedrock(stream=HAPPY_EVENTS)
+def test_invalid_request_is_422_and_costs_nothing(body: dict[str, Any]) -> None:
+    fake = FakeAgentCore(stream=HAPPY_EVENTS)
 
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json={"messages": messages})
+    response = client_using(fake).post("/v1/chat", headers=TENANT, json=body)
 
     assert response.status_code == 422
     assert fake.calls == []
 
 
-# ---------- Bedrock refuses before streaming starts ----------
+# ---------- the harness refuses before streaming starts ----------
 
 
 def test_throttling_is_503_with_retry_after() -> None:
-    fake = FakeBedrock(error=aws_error("ThrottlingException"))
-
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json=ONE_QUESTION)
+    response = ask(FakeAgentCore(error=aws_error("ThrottlingException")))
 
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"
 
 
-def test_other_bedrock_error_is_502_without_leaking_details() -> None:
-    fake = FakeBedrock(error=aws_error("AccessDeniedException"))
-
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json=ONE_QUESTION)
+def test_other_error_is_502_without_leaking_details() -> None:
+    response = ask(FakeAgentCore(error=aws_error("AccessDeniedException")))
 
     assert response.status_code == 502
     assert "AccessDenied" not in response.text
 
 
-# ---------- Bedrock fails after streaming started ----------
+# ---------- the harness fails after streaming started ----------
 
 
-def test_error_mid_stream_becomes_error_event() -> None:
-    def breaks_after_one_piece() -> Iterator[dict[str, Any]]:
-        yield HAPPY_EVENTS[1]
-        raise aws_error("modelStreamErrorException")
+def test_error_event_in_the_stream_becomes_error_without_details() -> None:
+    stream: list[dict[str, Any]] = [
+        {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "Co"}}},
+        {"runtimeClientError": {"message": "secret internals"}},
+    ]
 
-    fake = FakeBedrock(stream=breaks_after_one_piece())
+    response = ask(FakeAgentCore(stream=stream))
 
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json=ONE_QUESTION)
-
-    assert response.status_code == 200
     events = parse_sse(response.text)
-    assert events[0] == ("delta", '"Hel"')
-    assert events[1][0] == "error"
-    assert ("done", "[DONE]") not in events
+    assert [name for name, _ in events] == ["session", "delta", "error"]
+    assert "secret internals" not in response.text
+
+
+def test_broken_connection_mid_stream_becomes_error_event() -> None:
+    def breaks_after_one_piece() -> Iterator[dict[str, Any]]:
+        yield {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "Co"}}}
+        raise aws_error("InternalServerException")
+
+    events = parse_sse(ask(FakeAgentCore(stream=breaks_after_one_piece())).text)
+
+    assert [name for name, _ in events] == ["session", "delta", "error"]

@@ -23,11 +23,17 @@ class Settings(BaseSettings):
     aws_profile: str | None = None
     aws_region: str = "us-west-2"
 
-    # Required, no default: the app refuses to start without a model.
-    bedrock_synth_model_id: str
+    # Everything below is required, no default: the app refuses to start without it.
+    # IDs come from the AWS console; docs/learning/aws.md says where each one lives.
 
-    # Caps the answer length, which caps the cost of one request.
-    max_output_tokens: int = 1024
+    # Documents: the bucket uploads go to, and the Knowledge Base that indexes it.
+    s3_bucket: str
+    kb_id: str
+    kb_data_source_id: str
+
+    # The agent (AgentCore Harness) and the memory that keeps its conversations.
+    harness_arn: str
+    memory_id: str
 
 
 @lru_cache

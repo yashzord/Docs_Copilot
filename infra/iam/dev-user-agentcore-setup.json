@@ -1,0 +1,44 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CreateRolesForAgentCoreAndKnowledgeBases",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy", "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies", "iam:TagRole", "iam:PassRole",
+        "iam:CreatePolicy", "iam:DeletePolicy", "iam:GetPolicy", "iam:ListPolicyVersions", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::901708383582:role/AgentCore*",
+        "arn:aws:iam::901708383582:role/*BedrockAgentCore*",
+        "arn:aws:iam::901708383582:role/service-role/AmazonBedrockExecutionRoleForKnowledgeBase*",
+        "arn:aws:iam::901708383582:policy/AgentCore*"
+      ]
+    },
+    {
+      "Sid": "CloudFormationForAgentCoreCli",
+      "Effect": "Allow",
+      "Action": ["cloudformation:*"],
+      "Resource": "arn:aws:cloudformation:us-west-2:901708383582:stack/AgentCore-*/*"
+    },
+    {
+      "Sid": "CdkBootstrapAndAssets",
+      "Effect": "Allow",
+      "Action": ["cloudformation:DescribeStacks", "cloudformation:ListStacks", "ssm:GetParameter", "s3:*"],
+      "Resource": [
+        "arn:aws:cloudformation:us-west-2:901708383582:stack/CDKToolkit/*",
+        "arn:aws:ssm:us-west-2:901708383582:parameter/cdk-bootstrap/*",
+        "arn:aws:s3:::cdk-*"
+      ]
+    },
+    {
+      "Sid": "ReadLogsFromAgentCore",
+      "Effect": "Allow",
+      "Action": ["logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:StartLiveTail", "logs:StopLiveTail"],
+      "Resource": "*"
+    }
+  ]
+}

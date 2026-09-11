@@ -5,8 +5,15 @@ One section per topic. Added as the project meets them.
 ```
 1. What is a model                      D1
 2. Choosing a model                     D1
-3. RAG, the idea and the five kinds     D2 to D5
-(next: embeddings, chunking, evals, agents, MCP, A2A, guardrails, knowledge graphs)
+3. RAG, the idea                        D2
+4. Inside a RAG pipeline                D2, D3
+   4.1 parsing  4.2 chunking  4.3 embeddings  4.4 vector search
+   4.5 keyword search and hybrid  4.6 reranking  4.7 metadata filters
+   4.8 citations  4.9 buy vs build
+5. Inside GraphRAG                      D4
+6. Inside an agent                      D2
+   6.1 the loop  6.2 tools and MCP  6.3 memory  6.4 harness vs framework
+(next: evals, guardrails, multi-agent)
 ```
 
 ---
@@ -70,16 +77,18 @@ Not one model. Several jobs, each with different dial settings.
 | Job | What it does | Dials that matter | When |
 |---|---|---|---|
 | Synthesis | reads retrieved excerpts, writes the answer with citations | capability. This is what the user reads | D1 |
-| Router | reads the question, picks a strategy (direct / search / graph) | speed, price. Tiny output, thousands of calls | D3 |
-| Extraction | pulls entities and relations out of every chunk | price. One call per chunk, hundreds of chunks | D4 |
+| Supervisor | reads the question, picks a strategy (direct / search / graph) | speed, price. Tiny output, many calls | D5 |
+| Extraction | pulls entities and relations out of every chunk (GraphRAG) | price. One call per chunk. Bedrock GraphRAG allows Claude Haiku 4.5 or Nova | D4 |
 | Embeddings | turns text into a vector of numbers for search | a different kind of model entirely | D2 |
 | Rerank | rescores search results against the question | also a separate kind of model | D3 |
+| Judge | scores answers in the eval set | capability; it grades the others | D3 |
 
-D1 needs **synthesis only**. One decision. The router arrives in D3 and
+D1 needs **synthesis only**. One decision. The supervisor arrives in D5 and
 gets decided then, with real numbers from the eval set.
 
-Embeddings and rerank models output numbers, not text. Different catalog,
-different decision, D2.
+Embeddings and rerank models output numbers, not text. The managed
+Knowledge Base picks both for us (section 4.3, 4.6); the decision left to
+us in D3 is whether to swap the reranker for Cohere Rerank 3.5.
 
 ### 2.3 What is on the menu (Bedrock, us-west-2)
 
@@ -151,7 +160,7 @@ That is why it is config, not code.
 
 ---
 
-## 3. RAG: the idea and the five kinds
+## 3. RAG: the idea
 
 RAG = retrieval-augmented generation. The model reads the right parts of
 your documents before answering, instead of guessing from memory.
@@ -159,24 +168,300 @@ your documents before answering, instead of guessing from memory.
 ```
 question --> find the relevant chunks --> hand them to the model --> answer + citations
              ^^^^^^^^^^^^^^^^^^^^^^^^
-             this "find" step is what changes between RAG types
+             the "find" step is where all the engineering is (section 4)
 ```
 
-Five kinds, one per deliverable, each fixing a weakness of the last:
+Why it exists: a model knows only what was in its training text. Your
+handbook was not. Fine-tuning (re-training the model on your documents) is
+slow, expensive, and goes stale the day a document changes. RAG needs no
+training: change a document, re-index it, the next answer uses it.
 
-| # | Kind | How "find" works | Weakness it leaves | When |
-|---|---|---|---|---|
-| 1 | Naive | vector similarity only | misses exact words (codes, names) | D2 |
-| 2 | Hybrid + rerank | vector + keyword (BM25), merged, then rescored | one-shot, cannot chain facts | D3 |
-| 3 | Adaptive router | cheap model picks: direct / naive / hybrid / graph | only as good as its options | D3 |
-| 4 | GraphRAG | entities and relations in Neo4j, walk the graph | expensive to build | D4 |
-| 5 | Agentic | agent loops: search, read, search again, answer | slow, costly, for multi-hop only | D5 |
+Two failure modes RAG is judged on:
 
-Plus **Bedrock Knowledge Base** (D3): Amazon's ready-made RAG over the same
-documents. Not built by us. The yardstick we measure ours against.
+- **Retrieval miss:** the right passage was never found, so the model cannot answer, or makes something up.
+- **Hallucination:** the passage was found, but the model wrote something the passage does not say.
 
-The eval set (30+ questions, scored with RAGAS) says whether each step
-improved answers or just added machinery.
+The eval set (D3) measures both.
+
+---
+
+## 4. Inside a RAG pipeline
+
+We use a Bedrock Knowledge Base, which runs every step below for us. This
+section is what it does inside, so that "the KB handles it" is never the
+whole answer.
+
+```mermaid
+flowchart LR
+    subgraph ingest [ingestion, once per document]
+        F[file or URL] --> P[4.1 parse<br/>to plain text] --> C[4.2 chunk] --> E[4.3 embed<br/>chunk to vector] --> I[(index:<br/>vectors + words)]
+    end
+    subgraph query [query, every question]
+        Q[question] --> QE[embed the question] --> VS[4.4 vector search]
+        Q --> KS[4.5 keyword search]
+        VS --> M[merge] --> R[4.6 rerank] --> T[top chunks + sources]
+        KS --> M
+    end
+```
+
+### 4.1 Parsing
+
+Turn PDFs, Word files, HTML, and markdown into plain text. Harder than it
+sounds: PDF has no notion of "paragraph", just characters at coordinates.
+Tables, headers repeated on every page, two-column layouts, and scanned
+images all break naive parsers. The KB's managed parser handles these,
+including reading text out of images.
+
+### 4.2 Chunking
+
+Cut the text into pieces small enough to be precise and large enough to
+carry meaning.
+
+```
+too small:  "15 days."                 matches nothing useful
+too large:  the whole handbook          matches everything, weakly
+about right: one paragraph or section   "New employees get 15 days of leave in year one..."
+```
+
+Strategies, and what the KB offers:
+
+| Strategy | How it cuts | Good for | KB (managed) |
+|---|---|---|---|
+| default | ~300 tokens, ends at sentence boundaries | most documents | yes, default |
+| fixed size | N tokens with an overlap so a sentence cut at the edge lands in both pieces | predictable, tunable | yes |
+| semantic | embed each sentence, cut where meaning shifts | documents with no headings | custom KB only |
+| hierarchical | small child chunks for matching, the larger parent chunk is what the model reads | long documents | custom KB only |
+
+D3 compares default vs fixed on the eval set. **Overlap** is the trick to
+remember: without it, a sentence split across two chunks is lost to both.
+
+### 4.3 Embeddings
+
+An embedding model turns text into a list of numbers, a **vector**, so
+that texts with similar meaning get similar vectors.
+
+```
+"vacation policy"        -> [0.12, -0.80, 0.33, ... ]  (1,024 numbers)
+"annual leave rules"     -> [0.11, -0.78, 0.35, ... ]  close to the first
+"database index tuning"  -> [-0.60, 0.20, -0.05, ...]  far away
+```
+
+Picture a map with 1,024 directions instead of 2: every chunk is a pin,
+and "close on the map" means "similar in meaning". Same-meaning, different
+words still land close, which is what keyword search cannot do.
+
+Cost: one embedding call per chunk at ingest, one per question at query.
+The managed KB uses its own embedding model at no extra charge. The
+Titan model we tested returns 1,024 numbers per text.
+
+### 4.4 Vector search
+
+Given the question's vector, find the chunk vectors closest to it.
+Comparing against every chunk is fine for thousands, too slow for
+millions, so indexes use **approximate nearest neighbor** structures (the
+common one is called HNSW: a graph of shortcuts between neighbors). They
+trade a tiny bit of accuracy for speed.
+
+Closeness is usually **cosine similarity**: the angle between two vectors,
+ignoring their length. 1.0 = same direction, 0 = unrelated.
+
+### 4.5 Keyword search and hybrid
+
+Vector search misses things that have no meaning to embed: error codes,
+product names, ticket numbers, exact phrases. `E4471` is just letters.
+Keyword search finds it instantly. The classic scoring formula is
+**BM25**: a chunk scores higher when the query's words appear in it often,
+and those words are rare across the whole collection.
+
+**Hybrid** runs both and merges the two ranked lists. The usual merge is
+**reciprocal rank fusion (RRF)**: each chunk gets points for its position
+in each list (1st place is worth more than 10th), and the points add up.
+Position-based, so the two systems' unrelated score scales never fight.
+
+```
+vector list:  A, C, B, ...        keyword list:  B, A, D, ...
+RRF:  A = 1/(k+1) + 1/(k+2)   B = 1/(k+3) + 1/(k+1)   ->  A, B, C, D
+```
+
+The managed KB always uses hybrid search. (There is no way to switch to
+vector-only on it, which is why D3 does not demo that comparison.)
+
+### 4.6 Reranking
+
+Retrieval is fast and rough. A reranker is slow and careful: it reads the
+question and each candidate chunk **together** and scores how well the
+chunk answers the question. Retrieval looks at 1,000s of chunks; the
+reranker only looks at the top 20 or so, then re-sorts them.
+
+Why it helps: the embedding model saw the chunk and the question
+separately (a "bi-encoder"). The reranker sees them side by side (a
+"cross-encoder") and can notice that a chunk mentions vacation but is
+about a different country.
+
+The managed KB reranks by default with its own model; D3 also tries Cohere
+Rerank 3.5 and no reranking, and measures the difference.
+
+### 4.7 Metadata filters
+
+Each document can carry labels: `tenant_id`, `source`, `date`. Retrieval
+applies them as a filter, so a search only ever sees one tenant's chunks.
+In the KB, the labels come from a small `file.pdf.metadata.json` next to
+each file in S3. This is our multi-tenant wall inside the search engine.
+
+### 4.8 Citations
+
+Every retrieved chunk comes back with where it came from (the S3 file, and
+the page for PDFs). The answer prompt tells the model to mark which chunk
+supports each claim, and the UI turns those marks into clickable sources.
+A citation is not proof: the eval's "faithfulness" score checks whether
+the answer actually follows from the cited text.
+
+### 4.9 Buy vs build
+
+Everything in 4.1 to 4.8 can be built by hand: a parser library, a chunker,
+an embedding call, OpenSearch or pgvector, RRF in Python, a rerank call.
+It was the original plan. Using the KB instead trades that code for
+configuration, and moves the effort to what the KB cannot do: deciding
+*when* to retrieve (agents), the knowledge graph, and measuring quality.
+The self-built path stays in the README as the alternative, with its
+tradeoffs.
+
+---
+
+## 5. Inside GraphRAG
+
+Chunk search answers "where is X mentioned". It struggles with "how does
+X relate to Y" when the answer is spread over several documents.
+
+### 5.1 What gets built at ingest
+
+A model reads each chunk and extracts **entities** (people, teams,
+services, products) and **relationships** between them:
+
+```
+chunk: "The billing service is owned by the Payments team, led by Dana."
+
+entities:      billing service (Service), Payments (Team), Dana (Person)
+relationships: billing service --owned by--> Payments
+               Payments --led by--> Dana
+```
+
+Do that for every chunk and link the same entity across chunks, and you
+get a **knowledge graph**: nodes and edges, each edge pointing back to the
+chunk that stated it.
+
+```mermaid
+flowchart LR
+    B[billing service] -- owned by --> P[Payments team]
+    P -- led by --> D[Dana]
+    O[orders service] -- depends on --> B
+    S[search service] -- depends on --> B
+```
+
+### 5.2 What happens at query
+
+1. Normal vector search finds the chunks closest to the question.
+2. Take the entities in those chunks, walk their edges one or two hops, and pull in the chunks behind those edges too.
+3. Hand the expanded set to the model.
+
+"Which teams depend on billing, and who owns them?" now brings back the
+orders and search chunks, the Payments chunk, and Dana's, even though no
+single chunk mentions all of them.
+
+### 5.3 What Bedrock does, and what it hides
+
+Bedrock GraphRAG runs the extraction (with Claude Haiku 4.5 or Nova),
+stores the graph in **Neptune Analytics**, and does the expansion inside
+the Retrieve call. You cannot tune the extraction prompt or see the graph
+without extra tooling, and the graph engine bills by the hour
+(aws.md section 8). The self-built alternative (Neo4j in Docker, our own
+extraction prompt, a visual graph browser) is what the original plan had;
+it is the path to take when the graph itself needs to be inspected or
+customized.
+
+---
+
+## 6. Inside an agent
+
+A chatbot answers. An **agent** decides what to do, does it, looks at the
+result, and decides again, until the job is done.
+
+### 6.1 The loop
+
+Every agent, whatever the framework, is this loop:
+
+```mermaid
+flowchart TD
+    Q[user message] --> M[model call<br/>with the tool list in the prompt]
+    M -->|answer text| A[reply to user]
+    M -->|"I want to call tool X with these arguments"| T[run tool X]
+    T -->|result| M
+```
+
+The model never runs anything. It writes a **tool call**: a tool name and
+arguments as JSON. Something outside the model (the loop) runs the tool,
+feeds the result back as a new message, and calls the model again. The
+model then answers, or asks for another tool. A stop reason of `tool_use`
+means "run this and come back"; `end_turn` means "done".
+
+We saw the raw version of this in D1: Llama 4 Maverick, given a
+`get_weather` tool, replied with a `toolUse` block instead of text.
+
+What the loop also has to handle, and why it is not trivial:
+
+| Concern | What goes wrong without it |
+|---|---|
+| iteration limit | a confused model calls tools forever |
+| timeouts | one slow tool hangs the whole conversation |
+| context truncation | a long chat overflows the model's window |
+| error results | a failed tool must go back as "failed", not crash the loop |
+| parallel calls | Maverick asked for the same tool twice in one turn |
+| tracing | you cannot debug what you cannot see |
+
+### 6.2 Tools and MCP
+
+A tool is a function with a name, a description, and a JSON schema for its
+arguments. The description is what the model reads to decide when to use
+it, so it matters as much as the code.
+
+**MCP (Model Context Protocol)** standardizes how an agent discovers and
+calls tools: an MCP server publishes `tools/list` (names, descriptions,
+schemas) and answers `tools/call`. Any MCP client can use any MCP server.
+
+```
+agent (MCP client)  --tools/list-->  MCP server   "I have Retrieve(query, numberOfResults)"
+agent (MCP client)  --tools/call-->  MCP server   Retrieve(query="vacation days")
+```
+
+In this project the MCP server is **AgentCore Gateway** (aws.md 10.3): it
+wraps the Knowledge Base, a Lambda function, and later other agents as
+MCP tools, and adds login checks and policy.
+
+### 6.3 Memory
+
+The model forgets everything between calls. "Memory" is always something
+outside the model:
+
+- **Short-term:** the conversation so far, replayed into each call. Grows every turn (we measured 48 to 126 tokens in D1). Needs truncation or summarization eventually.
+- **Long-term:** facts extracted from past conversations ("prefers answers in dollars"), stored separately, and searched for relevant ones at the start of a new session.
+
+AgentCore Memory does both (aws.md 10.4).
+
+### 6.4 Harness vs framework
+
+Two ways to get the loop:
+
+| | Managed harness (AgentCore Harness) | Framework (Strands, LangGraph) |
+|---|---|---|
+| you write | configuration: model, instructions, tools, memory, limits | the loop, in code |
+| control | what the config exposes | everything |
+| fits | one agent with tools, which is most assistants | workflows with explicit steps, branches, pauses |
+
+We use the Harness for the assistant. When a workflow needs explicit
+steps (the research agent in D6), we write it in **Strands**, the
+framework the Harness itself is built on. LangGraph is the common
+alternative: it makes you draw the workflow as a graph of nodes and
+edges, which is more control and more code.
 
 ---
 
@@ -186,4 +471,9 @@ improved answers or just added machinery.
 2. Which dial matters most for the router job, and why not capability?
 3. Why is D1 only one model decision, not two?
 4. What does the eval set change about how you choose a model?
-5. What single step differs between the five RAG kinds?
+5. Why does a chunk need overlap with its neighbor?
+6. Give one question vector search misses and keyword search catches.
+7. What does a reranker see that the embedding model did not?
+8. In GraphRAG, what turns "chunks" into "a graph", and what does the graph add at query time?
+9. Who runs a tool: the model, or the loop around it?
+10. What does an MCP server publish, and why does that let any agent use it?

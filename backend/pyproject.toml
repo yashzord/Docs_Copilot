@@ -15,6 +15,9 @@ dependencies = [
   "uvicorn[standard]>=0.52.4",
   "boto3>=1.43.91",
   "pydantic-settings>=2.15.0",
+  "psycopg[binary]>=3.3.5",
+  "psycopg-pool>=3.3.1",
+  "python-multipart>=0.0.32",
 ]
 
 # PEP 735 dependency groups. "dev" is installed by `uv sync`, skipped by `uv sync --no-dev`.
@@ -29,7 +32,8 @@ dev = [
   # https://starlette.dev/testclient/
   "httpx2>=2.12.0",
   # Type descriptions of boto3's dicts, for mypy only. Never imported at runtime.
-  "boto3-stubs[bedrock-runtime]>=1.43.91",
+  "boto3-stubs[bedrock-agent-runtime,bedrock-runtime,s3]>=1.43.91",
+  "moto[s3]>=5.2.3",
 ]
 
 [tool.ruff]

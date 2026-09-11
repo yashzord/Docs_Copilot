@@ -33,8 +33,8 @@ agents, AWS, containers, and scaling, one working piece at a time.
 | Assistant | the AgentCore Harness: one managed agent that picks the right tool per question | D2 |
 | Documents tool | the managed Knowledge Base, exposed through Gateway as `Retrieve` | D2 |
 | Browser tool | AgentCore Browser: the agent reads live web pages | D3 |
-| Research agent | a Strands agent on AgentCore Runtime, called through the Gateway | D4 |
-| Graph tool | the GraphRAG Knowledge Base on Neptune, behind the Gateway | D5 |
+| Graph tool | the GraphRAG Knowledge Base on Neptune, behind the Gateway | D4 |
+| Research agent | a Strands agent on AgentCore Runtime, called through the Gateway | later |
 
 ### How agents use tools
 
@@ -60,7 +60,7 @@ A Bedrock Knowledge Base does retrieval: it parses and chunks each
 document, turns chunks into vectors, and answers a question with hybrid
 search (meaning plus exact words) followed by a reranker (D2). A
 second knowledge base holds a knowledge graph of entities and
-relationships for "how does X relate to Y" questions (D5). The agent
+relationships for "how does X relate to Y" questions (D4). The agent
 picks which one a question needs, by choosing a tool. An eval set of 30+
 questions, scored by Bedrock's built-in RAG evaluation, measures every
 change (later). The learning docs explain what happens inside each of these,
@@ -147,11 +147,10 @@ or its own container.
 [x] D1  skeleton + streaming chat with Bedrock
 [x] D2  upload -> S3 -> managed Knowledge Base; Gateway exposes it as a tool; Harness answers with citations; sidebar from Memory
 [x] D3  Browser tool on the Harness; long-term memory (facts, preferences)
-[ ] D4  research agent: Strands on AgentCore Runtime, called through the Gateway
-[ ] D5  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (one sitting: create, test, delete)
+[x] D4  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (graph stopped when idle, deleted after the demo)
 
 then   stop and review; reverse-learning pass: trace one question end to end, break things on purpose
-later  maybe: Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
+later  maybe: research agent (Strands on Runtime); Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
 ```
 
 ---

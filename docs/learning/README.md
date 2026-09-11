@@ -38,3 +38,5 @@ the project moves. If something is wrong or unclear, fix it in place.
 10. `aws.md` sections 6, 7 and 10 (S3, Knowledge Bases, AgentCore)
 11. `ai.md` 2.7 (why the agent's model changed)
 12. `D2.md` (documents, the agent, citations)
+13. `D3.md` (browser, long-term memory) and `ai.md` 2.8 (why the model changed again)
+14. `ai.md` section 5, then `D4.md` (GraphRAG)

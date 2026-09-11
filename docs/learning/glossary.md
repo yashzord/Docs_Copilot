@@ -11,6 +11,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | AgentCore | Bedrock's set of managed services for running agents: Harness, Gateway, Memory, Identity, Runtime, ... | aws |
 | API | a program other programs talk to over HTTP | web |
 | App Router | Next.js's way of turning folders into URLs | web |
+| ARN | Amazon Resource Name: the full address of one AWS resource, e.g. arn:aws:lambda:us-west-2:<account>:function:<name> | aws |
 | async def | a function that says when it is waiting, so the server can serve others meanwhile | web |
 | BFF | backend for frontend: a server route the page calls, which calls the real API | web |
 | blocking | a call that holds the thread until it finishes (boto3 does this) | web |
@@ -59,6 +60,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | functional update | `setX(prev => ...)`: compute new state from the latest state | web |
 | Gateway | AgentCore's managed MCP server: wraps APIs, Lambdas, Knowledge Bases and agents as tools | aws |
 | GIL | Python's lock: one thread runs Python code at a time, but a thread waiting on the network steps aside | web |
+| graph construction model | the model that reads each chunk during a GraphRAG sync and writes out things and their relationships (ours: Nova 2 Lite) | aws |
 | GraphRAG | RAG that also walks a knowledge graph of entities and relationships | ai |
 | hallucination | the model states something its sources do not say | ai |
 | Harness | AgentCore's managed agent: model, instructions, tools and memory declared as config | aws |
@@ -71,10 +73,13 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | inference | one call to a model | ai |
 | inference profile | a model's ID string on Bedrock. `us.` prefix means any US region may serve it | aws |
 | ingestion job | the Knowledge Base's background run that reads new files and updates the index | aws |
+| inline policy | a permission written directly on one role or user, not shared; used for the Lambda and Gateway roles in D4 | aws |
 | input tokens | what you send: prompt, documents, history | ai |
 | judge model | a model that scores other models' answers in an eval | ai |
 | Knowledge Base | Bedrock's managed RAG service: ingest documents, answer Retrieve calls with chunks | aws |
 | knowledge graph | nodes (entities) and edges (relationships) extracted from documents | ai |
+| Lambda | AWS's run-code-on-demand service: you upload a function, AWS runs it per call, billed per call | aws |
+| Lambda target | a Gateway target that turns a Lambda function into an MCP tool, described by a tool schema | aws |
 | lint | automatic check for style mistakes and common bugs (ruff) | tooling |
 | lockfile | exact versions of everything installed, so installs repeat | tooling |
 | long-term memory | facts, summaries or preferences extracted from past sessions and searched later | ai |
@@ -139,6 +144,7 @@ Every new word, one line, plain meaning. Alphabetical. Add as you go.
 | thread pool | a set of worker threads that run blocking code off the main loop. 40 by default in FastAPI | web |
 | token | about three quarters of a word. The billing unit for models | ai |
 | tool call | the model asking for a tool by name with JSON arguments; the loop runs it | ai |
+| tool schema | a tool's menu entry: name, description (what the agent reads to decide), input fields | ai |
 | type stripping | Node removing TypeScript types so it can run a `.ts` file directly | tooling |
 | type stubs | a package that describes another library's types to mypy | tooling |
 | typecheck | automatic check that types line up (mypy) | tooling |

@@ -424,6 +424,7 @@ frontend/
   lib/
     sse.ts                    plain TypeScript: turns stream text into events
     citations.ts              plain TypeScript: finds [1] markers in an answer
+    markdown.ts               plain TypeScript: bold, lists and code in an answer
 ```
 
 Two file names are special:
@@ -862,6 +863,33 @@ both, so a model's habit does not break the links:
 
 `[a]` or `[123]` are not treated as citations. Four tests in
 `lib/citations.test.ts` pin this down.
+
+### 13.7 Markdown: bold, lists and code
+
+The model writes markdown: `**bold**`, numbered and dashed lists, `` `code` ``.
+Printed as plain text it shows the asterisks. The first real-browser test
+(2026-09-11) caught exactly that, so `lib/markdown.ts` reads a small subset:
+
+```
+"1. **Cost**: it bills by the hour [1]."
+  -> item, marker "1."
+       bold "Cost"
+       text ": it bills by the hour "
+       cite 1
+       text "."
+```
+
+- `parseMarkdown()` cuts the answer into blocks: paragraphs, headings, list items (with their depth, for nested bullets). A blank line ends a block; a wrapped line continues it.
+- `parseInline()` cuts one block into bold, code, text and citation pieces, reusing `splitCitations()` from 13.6.
+- `Chat.tsx` draws them (`Markdown` and `Pieces`). It works on a half-streamed answer too: it just has fewer blocks.
+
+A subset on purpose: tables, links and quotes stay plain text. The upgrade
+is the `react-markdown` package, if answers start using more. Four tests in
+`lib/markdown.test.ts`, the first built from a real answer.
+
+**Bare-number citations.** Mistral Large 3 sometimes writes `hour1.` instead
+of `hour [1].` No pattern can safely catch that (think `S3`, `D4`), so the
+fix is in the prompt: rule 3 now shows an exact example of a marker.
 
 ---
 

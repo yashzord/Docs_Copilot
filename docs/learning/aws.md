@@ -886,6 +886,15 @@ Records appear a few minutes after a chat, and the harness searches them at
 the start of the next one. Events expire after 30 days. Details and the
 test that proved it: `D3.md`.
 
+**Deleting memory.** The data API can delete events (`DeleteEvent`) and
+long-term records (`DeleteMemoryRecord`, `BatchDeleteMemoryRecords`), but
+there is **no call to delete a conversation**. A wiped conversation still
+shows in `ListSessions` with nothing in it, so `sessions.py` hides
+conversations that have no events. Long-term records must be listed by their
+exact namespace (`/actors/dev/facts/`, `/actors/dev/preferences/`,
+`/actors/dev/summaries/<session>/`); a prefix like `/actors/dev/` finds
+nothing. Both learned during the fresh start on 2026-09-11.
+
 ### 10.5 Permissions
 
 Moved to section 11, which lists every identity in the project. Two

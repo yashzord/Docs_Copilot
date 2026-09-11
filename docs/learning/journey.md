@@ -5,7 +5,7 @@ service, who it acts as, and what the data looks like at that moment.
 Read this after the big picture on the "Start here" page, and before the
 topic sections: it gives every later section a place to hang.
 
-Line numbers are from commit `c7cb2c0` (2026-09-11). If they drift, search
+Line numbers match the code after the real-browser test (2026-09-11). If they drift, search
 for the function name.
 
 ---
@@ -195,13 +195,13 @@ data: "Neptune Analytics was dropped because"
 
 1. `createSseParser()` (`lib/sse.ts:11`) turns text chunks into events, even when a chunk cuts an event in half.
 2. Lines 80 to 93 route each event: `session` remembers the id (the next message reuses it), `tool` adds "Searched your documents for ...", `sources` attaches the cards, `delta` appends text.
-3. `Answer` (`Chat.tsx:230`) renders. `splitCitations` (`lib/citations.ts:10`) turns `[1]` into a small link to source card 1.
+3. `Answer` (`Chat.tsx:230`) renders. `parseMarkdown` (`lib/markdown.ts`) turns bold, lists and code into page elements, and `splitCitations` (`lib/citations.ts:10`) turns `[1]` into a small link to source card 1.
 
 ### 12. After the answer
 
 - The Harness saves this turn to **Memory**: about ten events (question, tool call, tool result, answer, plus internal state).
 - A few minutes later, long-term strategies extract facts, preferences and a summary from it.
-- The sidebar reloads its list; `sessions.py:43` asks Memory for this actor's sessions. Opening an old chat reads its events (`sessions.py:64`) and keeps only question and answer text (`sessions.py:100`).
+- The sidebar reloads its list; `sessions.py:43` asks Memory for this actor's sessions. Conversations whose events were all deleted are hidden (`has_events`, `sessions.py:64`): AgentCore can delete events, not conversations. Opening an old chat reads its events (`sessions.py:80`) and keeps only question and answer text (`sessions.py:116`).
 
 ---
 
@@ -228,7 +228,7 @@ identity, and that identity needs permission for exactly that call.**
 **browser** tool. It does not go through the Gateway; the Harness drives
 AWS's managed Chrome directly: open a session, navigate, read the text,
 close. The page text (often 30k to 150k tokens) goes into model call 2. The
-UI shows "Opened <url>" (`Chat.tsx:288`, `describeTool`).
+UI shows "Opened <url>" (`Chat.tsx:325`, `describeTool`).
 
 **A relationship question** ("how does the Gateway relate to Memory?"):
 hop 6 picks `graph___search_graph`. The Gateway invokes our Lambda

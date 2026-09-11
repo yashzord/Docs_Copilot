@@ -250,11 +250,11 @@ backend/                      one Python project (section 2)
     helpers.py                TENANT, aws_error, parse_sse, FakeAgentCore
     test_chat.py              15 tests
     test_documents.py         12 tests
-    test_sessions.py          6 tests
+    test_sessions.py          7 tests
 frontend/                     the Next.js app (web.md section 8)
   app/api/[...path]/route.ts  the proxy
   components/                 Chat.tsx, Sidebar.tsx
-  lib/                        sse.ts, citations.ts + their tests
+  lib/                        sse.ts, citations.ts, markdown.ts + their tests
 infra/
   iam/                        the least-privilege policies, kept as documentation
   lambda/graph_search/        handler.py + tool-schema.json (D4)
@@ -323,7 +323,7 @@ The event shapes in the fakes are copied from real captures (a real
 InvokeHarness stream and real Memory records, 2026-09-11), so the fakes
 match what AWS actually sends.
 
-### 7.3 What the 33 tests cover
+### 7.3 What the 34 tests cover
 
 `test_chat.py`, 15 tests:
 
@@ -347,7 +347,8 @@ writes nothing; too large is 413; bad tenant is 400 and writes nothing; a
 refused sync is 502; the list shows only this tenant's files without
 labels; sync status adds new and modified files; a malformed job id is 422.
 
-`test_sessions.py`, 6 tests: conversations newest first; only question and
+`test_sessions.py`, 7 tests: conversations newest first; conversations with
+no events are hidden (AgentCore cannot delete a conversation); only question and
 answer text, in order (tool calls, tool results and internal state
 dropped); every page of events is read; malformed Memory text is skipped;
 a malformed session id is 422; a Memory error is 502.
@@ -537,10 +538,11 @@ Two details that make it work:
 - **Node 24 runs `.ts` files directly.** It strips the type annotations and runs what is left. On since Node 23.6.
 - **The import needs the extension:** `import { createSseParser } from "./sse.ts"`. Node requires it; TypeScript normally forbids it, so `tsconfig.json` sets `allowImportingTsExtensions` (allowed because the project never emits `.js` files).
 
-The nine tests:
+The thirteen tests:
 
 - `lib/sse.test.ts` (5): complete events, an event split across chunks, keep-alive comments skipped, CRLF line endings split across chunks, an event with no name.
 - `lib/citations.test.ts` (4): text and markers separated, text with no markers stays one piece, gpt-oss's `【1】` style accepted, brackets that are not small numbers ignored.
+- `lib/markdown.test.ts` (4): a real answer (intro, numbered items with bold, a nested bullet, citations), wrapped lines and blank lines, headings and inline code, a lone `*` staying plain text.
 
 Docs: https://nodejs.org/api/test.html and https://nodejs.org/api/typescript.html
 

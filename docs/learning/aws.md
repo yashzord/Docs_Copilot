@@ -484,8 +484,10 @@ flowchart LR
 - **Ingestion job (sync):** the background run that reads new, changed, and deleted files and updates the index. Started by `StartIngestionJob`, finished a minute or a few later. This is why we do not need our own queue and worker. **One at a time per data source:** starting a second one while the first runs fails with `ConflictException` ("There is an ongoing ingestion job"); our upload keeps the file and the next sync picks it up.
 - **Service role:** an IAM role the KB assumes to read your bucket and call Bedrock models. The console creates it for you (section 11).
 
-Our upload syncs only the managed Knowledge Base. The graph Knowledge Base
-is synced by hand (console: its data source, **Sync**).
+Every upload starts a sync of both Knowledge Bases: the managed one (which
+the page watches) and the graph one (best effort: if it is busy, stopped, or
+refuses, the upload still succeeds and the next sync picks the file up). A
+graph sync only works while the Neptune graph is started (section 8).
 
 ### 7.3 Tenant labels: metadata files
 
@@ -890,7 +892,8 @@ test that proved it: `D3.md`.
 long-term records (`DeleteMemoryRecord`, `BatchDeleteMemoryRecords`), but
 there is **no call to delete a conversation**. A wiped conversation still
 shows in `ListSessions` with nothing in it, so `sessions.py` hides
-conversations that have no events. Long-term records must be listed by their
+conversations that have no events, and labels the rest with their first
+question (`session_title`, one `ListEvents` call per conversation). Long-term records must be listed by their
 exact namespace (`/actors/dev/facts/`, `/actors/dev/preferences/`,
 `/actors/dev/summaries/<session>/`); a prefix like `/actors/dev/` finds
 nothing. Both learned during the fresh start on 2026-09-11.

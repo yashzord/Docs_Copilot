@@ -249,8 +249,8 @@ backend/                      one Python project (section 2)
     conftest.py               settings every test gets
     helpers.py                TENANT, aws_error, parse_sse, FakeAgentCore
     test_chat.py              15 tests
-    test_documents.py         12 tests
-    test_sessions.py          7 tests
+    test_documents.py         14 tests
+    test_sessions.py          9 tests
 frontend/                     the Next.js app (web.md section 8)
   app/api/[...path]/route.ts  the proxy
   components/                 Chat.tsx, Sidebar.tsx
@@ -323,7 +323,7 @@ The event shapes in the fakes are copied from real captures (a real
 InvokeHarness stream and real Memory records, 2026-09-11), so the fakes
 match what AWS actually sends.
 
-### 7.3 What the 34 tests cover
+### 7.3 What the 38 tests cover
 
 `test_chat.py`, 15 tests:
 
@@ -340,15 +340,17 @@ match what AWS actually sends.
 | error event in the stream | `error` replaces `done`, AWS's text does not leak |
 | broken connection mid-stream | same `error` event |
 
-`test_documents.py`, 12 tests: upload writes the label and the file then
-starts a sync; upload during a running sync keeps the file with no job;
+`test_documents.py`, 14 tests: upload writes the label and the file then
+starts both syncs (managed and graph); a busy graph sync leaves the main
+sync running; a refused graph sync does not fail the upload; upload during a running sync keeps the file with no job;
 file names can never leave the tenant folder (x3); wrong type is 415 and
 writes nothing; too large is 413; bad tenant is 400 and writes nothing; a
 refused sync is 502; the list shows only this tenant's files without
 labels; sync status adds new and modified files; a malformed job id is 422.
 
-`test_sessions.py`, 7 tests: conversations newest first; conversations with
-no events are hidden (AgentCore cannot delete a conversation); only question and
+`test_sessions.py`, 9 tests: conversations newest first; conversations with
+no events are hidden (AgentCore cannot delete a conversation); the title is
+the first question; a long title is shortened to 60 characters; only question and
 answer text, in order (tool calls, tool results and internal state
 dropped); every page of events is read; malformed Memory text is skipped;
 a malformed session id is 422; a Memory error is 502.

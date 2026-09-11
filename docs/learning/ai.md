@@ -486,8 +486,9 @@ answer, so the graph tool fails, and the agent can still answer from
 `docs___Retrieve`. Start the graph a few minutes before you need it
 (commands in D4.md).
 
-**Known limit:** uploading through the app syncs only the managed KB. The
-graph KB sees new files only after its own sync is started.
+**Uploads reach the graph too.** Every upload starts a sync of both KBs.
+The graph sync is best effort: while the graph is stopped it cannot run, and
+the file is picked up by the next graph sync after the graph is started.
 
 The self-built alternative (Neo4j, our own extraction prompt, a visual
 graph browser) is the path to take when the graph itself needs to be

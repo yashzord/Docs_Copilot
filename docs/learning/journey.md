@@ -201,7 +201,7 @@ data: "Neptune Analytics was dropped because"
 
 - The Harness saves this turn to **Memory**: about ten events (question, tool call, tool result, answer, plus internal state).
 - A few minutes later, long-term strategies extract facts, preferences and a summary from it.
-- The sidebar reloads its list; `sessions.py:43` asks Memory for this actor's sessions. Conversations whose events were all deleted are hidden (`has_events`, `sessions.py:64`): AgentCore can delete events, not conversations. Opening an old chat reads its events (`sessions.py:80`) and keeps only question and answer text (`sessions.py:116`).
+- The sidebar reloads its list; `sessions.py:43` asks Memory for this actor's sessions. Each conversation is labeled with its first question, and hidden if its events were all deleted (`session_title`, `sessions.py:69`): AgentCore can delete events, not conversations. Opening an old chat reads its events (`sessions.py:101`) and keeps only question and answer text (`sessions.py:137`).
 
 ---
 
@@ -244,12 +244,14 @@ started (`D4.md`).
 1. `Sidebar.tsx:58` sends the file as a multipart form to `/api/documents`.
 2. The proxy forwards it. `documents.py:107` (`upload`) cleans the name (`safe_filename`, line 74), checks type and size.
 3. Two S3 writes: the tenant label `x.md.metadata.json` first (line 130), then the file (line 138).
-4. `start_sync` (line 87) asks the managed Knowledge Base to re-read the bucket (`start_ingestion_job`, line 91). If a sync is already running, AWS says `ConflictException` and the file waits for the next one.
-5. The sidebar asks `/api/documents/sync/<job>` every 5 seconds (`documents.py:175`) until COMPLETE.
+4. `start_sync` (line 89) asks a Knowledge Base to re-read the bucket (`start_ingestion_job`, line 93). It runs twice: the managed Knowledge Base first (line 148), then the graph Knowledge Base (line 153). If a sync is already running, AWS says `ConflictException` and the file waits for the next one.
+5. The sidebar asks `/api/documents/sync/<job>` every 5 seconds (`documents.py:184`) until the managed sync is COMPLETE.
 
-**Known limit:** the upload syncs only the managed Knowledge Base
-(`KB_ID`). The graph Knowledge Base sees new files only after its own sync
-is started (console: Knowledge Bases, `docs-copilot-graph-kb`, Sync).
+The graph sync is best effort: if it cannot start, the upload still
+succeeds (the file and the managed sync already worked), the answer carries
+`"graph_ingestion_job_id": null`, and the file reaches graph search at the
+graph's next sync. It is not polled: it only matters for relationship
+questions.
 
 ---
 

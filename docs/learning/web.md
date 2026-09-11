@@ -812,21 +812,30 @@ parts, so size does not matter to our code.
 
 ### 13.4 Starting a sync, and the busy case
 
-Then `start_sync` (`documents.py:87`) asks the managed Knowledge Base to
+Then `start_sync` (`documents.py:89`) asks the managed Knowledge Base to
 re-read the bucket (`StartIngestionJob`). A data source runs **one sync at
 a time**. Starting a second one fails with `ConflictException` ("There is
 an ongoing ingestion job", checked live). That is not an error for us: the
 file is already stored, so the answer is 201 with
 `"ingestion_job_id": null`, and the next sync picks it up.
 
-Known limit: this syncs only the managed Knowledge Base (`KB_ID`). The
-graph Knowledge Base is synced by hand (`D4.md`).
+Then the same call starts a sync of the **graph** Knowledge Base
+(`GRAPH_KB_ID`), which reads the same bucket but only sees new files after
+its own sync. That one is best effort: busy or refused, the upload still
+returns 201, because the file and the main sync already worked. The answer
+carries both ids:
+
+```json
+{ "key": "tenants/dev/notes.md", "ingestion_job_id": "JL5NEA0617", "graph_ingestion_job_id": "BEJAOFP38Q" }
+```
+
+The page polls only the main sync (13.5); the graph one runs in the background.
 
 ### 13.5 Polling: asking again every 5 seconds
 
 A sync takes one to three minutes, far too long to hold one request open.
 So the sidebar **polls**: it asks `/api/documents/sync/<job>` every 5
-seconds (`documents.py:175` answers) until the status is `COMPLETE`,
+seconds (`documents.py:184` answers) until the status is `COMPLETE`,
 `FAILED` or `STOPPED`, showing "Indexing... N files scanned so far" in
 between.
 
@@ -851,6 +860,12 @@ and citation pieces:
 `Chat.tsx` draws each `cite` as a small link to `#source-1`, the source
 card with that number. The cards are `<details>` elements: click to open,
 no JavaScript needed.
+
+**More than one search in one answer.** Each search sends its own `sources`
+event, numbered from 1. The page keeps every list (`Message.sources` is a
+list of lists) and labels them "Search 1", "Search 2" when there is more than
+one. The model numbers passages per search, so `[1]` links to the latest
+list; only that list's cards carry the `#source-n` anchors.
 
 **Both marker styles are accepted.** The prompt asks for `[1]`. gpt-oss,
 our model for a while, often wrote its own habit instead: `【1】` or

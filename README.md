@@ -4,7 +4,7 @@ Upload documents, ask questions, and get streamed answers with citations
 from one AI agent that can also read web pages and connect facts across
 documents. Built step by step as a learning project.
 
-New here? Start with `docs/course.md`: the crash course, 26 lessons from
+New here? Start with `docs/course.md`: the crash course, 29 lessons from
 zero, in order, with plain words and pictures. The same course as a page
 with a sidebar: link at the top of that file.
 
@@ -213,9 +213,9 @@ Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 ## 7. Learning docs
 
-One file: `docs/course.md`, the crash course. Twenty-six lessons in six
+One file: `docs/course.md`, the crash course. Twenty-nine lessons in seven
 parts, written for someone new to coding: the terminal and git, the web
-part, AWS from zero, AI from zero, the agent, and putting it together, then
+part, AWS from zero, AI from zero, the agent, putting it together, and running it like production, then
 a glossary. Every lesson has the same shape: the idea, a picture, where it
 lives in this project, one thing to try on your own data, and questions to
 check yourself. What was tried and dropped is lesson 25.

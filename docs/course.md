@@ -29,11 +29,48 @@ graph when you finish for the day: it bills by the hour.
 There is one other doc, `docs/demo.md`: the script for showing the app to
 people. It is not a lesson.
 
-An **interactive map** of the whole system lives here:
+**The whole system on one sheet.** Solid arrows are calls. Everything on
+your laptop is code we wrote; everything on AWS is a service we set up.
+
+```mermaid
+flowchart LR
+    subgraph L[Your laptop]
+        B[Chat window<br/>Chat.tsx] --> P[Proxy<br/>route.ts] --> F[Backend<br/>FastAPI]
+    end
+    subgraph A[The agent, run by AWS]
+        H[Harness<br/>the loop] --> M[Model<br/>Mistral Large 3]
+        H --> Me[(Memory<br/>chats, preferences)]
+        H --> W[Browser<br/>a real Chrome]
+    end
+    subgraph T[Tools]
+        G[Gateway<br/>MCP server] --> La[Lambda<br/>graph search]
+    end
+    subgraph D[Data]
+        S[(S3 bucket<br/>your files)]
+        K[Knowledge Base<br/>chunk search]
+        GK[Graph Knowledge Base] --> N[(Neptune<br/>the graph)]
+    end
+    F -->|InvokeHarness| H
+    H -->|tool calls| G
+    G --> K
+    La --> GK
+    F -->|upload| S
+    K -.sync.-> S
+    GK -.sync.-> S
+```
+
+If you remember only three sentences, remember these:
+
+1. **The page talks only to our backend.** The chat window calls a small proxy, which calls our FastAPI server on your laptop. Nothing in the browser talks to AWS.
+2. **The backend hands your question to an agent that AWS runs.** The Harness loops: ask the model, run the tool it wants, give it the result, ask again, until it has an answer. The answer streams back piece by piece.
+3. **Every AWS call is made by some identity, and that identity needs permission for exactly that call.** Almost every AWS error you will see is one of these missing one permission.
+
+An **interactive map** of the same system lives here:
 https://claude.ai/code/artifact/b6c44e72-b148-49bc-9011-4a5d4da730d2
 Keep it open next to the course. Click any box for what it is, where its
 code lives, where it is in the AWS console, which identity it acts as, and
-what it costs.
+what it costs. Step through the four paths (a document question, a web
+page, a relationship question, an upload) with the arrow keys.
 
 ---
 

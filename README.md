@@ -4,8 +4,9 @@ Upload documents, ask questions, and get streamed answers with citations
 from one AI agent that can also read web pages and connect facts across
 documents. Built step by step as a learning project.
 
-New here? Start with `docs/learning/README.md`: the "Start here" learning
-path, in reading order, with plain words and pictures.
+New here? Start with `docs/course.md`: the crash course, 26 lessons from
+zero, in order, with plain words and pictures. The same course as a page
+with a sidebar: link at the top of that file.
 
 ---
 
@@ -83,7 +84,7 @@ not just how to switch them on.
 - Buy the plumbing, build the glue: AWS managed services for retrieval, the graph, the agent loop and memory; our own code for the API, the UI and one small Lambda.
 - About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour) is stopped when idle and deleted after the demo.
 - Models are config, not code: switching one is a single line.
-- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" section in `docs/learning/`.
+- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course.md`.
 
 ### The big picture
 
@@ -139,7 +140,7 @@ backend/             one Python project: pyproject.toml, uv.lock, .env
 infra/
   iam/               IAM policies, kept as documentation                D2
   lambda/graph_search/  the graph search Lambda + its tool schema       D4
-docs/learning/       "Start here" path, topic tracks, one build log per deliverable
+docs/                course.md (the crash course) and demo.md (the demo script)
 ```
 
 New backend code starts inside `backend/app`. Code that AWS runs for us (the
@@ -212,15 +213,12 @@ Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 ## 7. Learning docs
 
-Start with `docs/learning/README.md`, the "Start here" learning path:
+One file: `docs/course.md`, the crash course. Twenty-six lessons in six
+parts, written for someone new to coding: the terminal and git, the web
+part, AWS from zero, AI from zero, the agent, and putting it together, then
+a glossary. Every lesson has the same shape: the idea, a picture, where it
+lives in this project, one thing to try on your own data, and questions to
+check yourself. What was tried and dropped is lesson 25.
 
-1. the whole system in one picture;
-2. `journey.md`: one question followed hop by hop, file by file;
-3. one module per piece, each linking into the topic tracks;
-4. the build logs (`D1.md` to `D4.md`) as history.
-
-Interactive map: link in docs/learning/README.md.
-
-Behind the path: four topic tracks (`ai.md`, `aws.md`, `tooling.md`,
-`web.md`) and `glossary.md`. Written for a beginner, pictures over
-paragraphs, self-check at the end of each.
+The same course is published as a page with a sidebar (link at the top of
+the file), next to the interactive map of the whole system.

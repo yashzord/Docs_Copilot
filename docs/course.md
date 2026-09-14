@@ -2386,6 +2386,40 @@ permissions at once, `InvokeHarness` on the harness and
 `InvokeAgentRuntime` on the runtime underneath it. Reading the sidebar
 needs `ListSessions` and `ListEvents` on the memory.
 
+**Under the hood: AgentCore Identity, and why not yet**
+
+Everything above is IAM: identities for *your account's* people and
+services. **AgentCore Identity** is the piece for the two identities IAM
+does not cover: the *end user* talking to the agent, and the *agent
+itself* when it reaches into other companies' apps ([Identity docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/identity.html)).
+It has three parts:
+
+| Part | What it is | Our project today |
+|---|---|---|
+| **workload identity** | an identity record for each agent and gateway, created automatically. It is how an agent proves *which agent* it is to the token vault | already exists: our Gateway carries one (`workload-identity/docs-copilot-gw-kuctwujdbp`), and the Harness role may fetch a workload access token. Plumbing that sits unused |
+| **inbound authorizer** | a JWT check on the Harness or Gateway. Callers send a bearer token from a login provider (Cognito, Okta, Entra, any OpenID provider) instead of signing with IAM; the Harness checks it against the provider's discovery URL and allowed client ids | not used. Inbound is IAM: the backend signs as your user. There is no login, so there is no token |
+| **outbound credential providers** and the **token vault** | stored OAuth clients and API keys. The agent asks the vault for a token to call GitHub, Google, Slack, or an OpenAI key, and the code never sees the secret. OAuth comes in two shapes: 2-legged (the agent acts as itself) and 3-legged (the agent acts *on behalf of a user*, after that user consents once in a consent portal) | not used. Every tool we have is inside our account, reached with IAM roles |
+
+**Why the two halves are linked.** Per-user outbound credentials only
+work when the *inbound* call carried a user. With IAM inbound, the
+Harness does not know which human asked, so it cannot fetch a
+user-scoped token for a downstream app; the docs say this plainly, SigV4
+callers get no per-user identity propagation ([Harness security](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)).
+That is the honest reason Identity is not in this project: with one
+user and no third-party apps, both halves have nothing to do. The
+`dev` header stub stands exactly where a verified user id would go.
+
+**What it would take to add.** One day, no architecture change:
+
+1. A Cognito user pool with a hosted login page; the Next.js page signs in and holds the id token.
+2. `authorizerConfiguration: {customJWTAuthorizer: {discoveryUrl, allowedClients}}` on the Harness. Calls then carry `Authorization: Bearer <token>` instead of an IAM signature.
+3. The backend takes the user id from the token's claims and uses it as the Memory actor id and the tenant label. Every user gets their own conversations and long-term memory, and the label written in lesson 10 finally gets a filter.
+4. Optionally, a Cedar policy on the Gateway that reads the user's claims (lesson 28), which is the layered pattern AWS shows with Cognito plus AgentCore plus Cedar ([walkthrough](https://builder.aws.com/content/3EaHytE8A8uqqkW6ektZcFLGz06/enforce-layered-end-to-end-access-control-for-ai-agents-with-amazon-bedrock-agentcore-amazon-cognito-and-cedar)).
+
+The second half, a 3-legged OAuth provider so the agent can open a GitHub
+issue as you, is the "action tool" idea from the early plan. It needs
+the first half in place.
+
 **Try it**
 
 Break it: in IAM, detach `InvokeGraphSearchLambda` from the Gateway role,
@@ -2930,6 +2964,8 @@ Every word the course introduces, one line each. Alphabetical.
 | hybrid search | vector search and keyword search run together, results merged | 13 |
 | IAM | Identity and Access Management: who may do what in an AWS account | 9 |
 | IAM user | an identity for a person; ours is `yashubitra` | 9 |
+| Identity (AgentCore) | logins for end users (JWT inbound) and a token vault for agents to reach other apps; not used here | 22 |
+| JWT | a signed token from a login provider that proves who the user is; checked by an inbound authorizer | 22 |
 | ingestion job | the Knowledge Base's background run that reads new files; also called a sync | 14 |
 | inline policy | a permission written directly on one role, not shared | 9 |
 | JSON | text shaped like `{"key": "value"}`; how programs exchange data | 4 |
@@ -2986,6 +3022,7 @@ Every word the course introduces, one line each. Alphabetical.
 | test | a small program that runs our code with made-up input and checks the output | 3 |
 | thread pool | worker threads that run blocking code off the main loop; 40 by default | 5 |
 | token | about three quarters of a word; the billing unit for models | 11 |
+| token vault | AgentCore Identity's store of OAuth clients and API keys an agent may borrow, without seeing the secret | 22 |
 | tool call | the model asking for a tool by name with JSON arguments; the loop runs it | 16 |
 | tool schema | a tool's menu entry: name, description (what the model reads), input fields | 18 |
 | trace | the tree of spans for one request: what happened, in order, and how long each step took | 27 |
@@ -2997,3 +3034,4 @@ Every word the course introduces, one line each. Alphabetical.
 | validation | checking input against rules before using it | 5 |
 | vector | a list of numbers; here, an embedding | 12 |
 | vector search | finding the chunks whose vectors are closest to the question's | 13 |
+| workload identity | AgentCore Identity's record for one agent or gateway; created automatically; how an agent proves which agent it is | 22 |

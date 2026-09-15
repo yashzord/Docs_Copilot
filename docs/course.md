@@ -1028,8 +1028,8 @@ There are no real folders: the slashes in a key are just characters, and
 
 ```
 bucket: docs-copilot-901708383582
-  key:  users/8821c3e0-.../team-handbook.md                 the file
-  key:  users/8821c3e0-.../team-handbook.md.metadata.json   its label
+  key:  users/<your sub>/team-handbook.md                 the file
+  key:  users/<your sub>/team-handbook.md.metadata.json   its label
 ```
 
 Things that matter for us:
@@ -1042,7 +1042,7 @@ Things that matter for us:
 **The label file.** Next to each uploaded file goes a tiny JSON:
 
 ```
-{"metadataAttributes": {"8821c3e0-40b1-706d-9cd9-ade667c2feed": "owner"}}
+{"metadataAttributes": {"<your sub>": "owner"}}
 ```
 
 The Knowledge Base copies these labels onto every chunk of that file. A
@@ -1096,8 +1096,8 @@ aws s3 ls s3://docs-copilot-901708383582 --recursive --human-readable --profile 
 ```
 
 ```
-2026-09-15 00:36:13  420 Bytes users/8821c3e0-40b1-706d-9cd9-ade667c2feed/team-handbook.md
-2026-09-15 00:36:13   62 Bytes users/8821c3e0-40b1-706d-9cd9-ade667c2feed/team-handbook.md.metadata.json
+2026-09-15 00:36:13  420 Bytes users/<your sub>/team-handbook.md
+2026-09-15 00:36:13   62 Bytes users/<your sub>/team-handbook.md.metadata.json
 ```
 
 **Check yourself**
@@ -2245,10 +2245,10 @@ chat).
 
 ```
 memory docs_copilot_assistant-6aIbceHbw1
-    actor 8821c3e0-...  (one person)
+    actor <your sub>  (one person)
     session 8e9aeb31-...   events: question, tool call, tool result, answer, agent state...
     session c16bc23a-...   events: ...
-  actor b89123d0-...  (another person; nothing above is visible here)
+  actor <another sub>  (another person; nothing above is visible here)
   long-term records
     /actors/<sub>/preferences/         "Prefers concise, bullet-point responses..."
     /actors/<sub>/facts/               "The user asked about steps to enable MFA..."

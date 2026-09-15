@@ -16,10 +16,11 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 
 from app import documents
+from app.auth import get_user
 from app.aws import get_kb_admin, get_s3
 from app.main import app
 from tests.conftest import TEST_SETTINGS
-from tests.helpers import TENANT, aws_error
+from tests.helpers import aws_error
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -87,12 +88,8 @@ def client_using(s3: "S3Client", kb: FakeKb) -> TestClient:
     return TestClient(app)
 
 
-def upload(
-    client: TestClient, name: str, body: bytes = b"# Handbook", headers: dict[str, str] = TENANT
-) -> Any:
-    return client.post(
-        "/v1/documents", headers=headers, files={"file": (name, body, "text/markdown")}
-    )
+def upload(client: TestClient, name: str, body: bytes = b"# Handbook") -> Any:
+    return client.post("/v1/documents", files={"file": (name, body, "text/markdown")})
 
 
 def read_json(s3: "S3Client", key: str) -> Any:
@@ -102,22 +99,21 @@ def read_json(s3: "S3Client", key: str) -> Any:
 # ---------- upload: happy path ----------
 
 
-def test_upload_writes_file_and_tenant_label_then_starts_both_syncs(s3: "S3Client") -> None:
+def test_upload_writes_file_and_user_label_then_starts_both_syncs(s3: "S3Client") -> None:
     kb = FakeKb()
 
     response = upload(client_using(s3, kb), "hand book.md")
 
     assert response.status_code == 201
     assert response.json() == {
-        "key": "tenants/dev/hand_book.md",
+        "key": "users/user-a/hand_book.md",
         "ingestion_job_id": "JOB0000001",
         "graph_ingestion_job_id": "GRAPH00001",
     }
-    assert (
-        s3.get_object(Bucket=BUCKET, Key="tenants/dev/hand_book.md")["Body"].read() == b"# Handbook"
-    )
-    assert read_json(s3, "tenants/dev/hand_book.md.metadata.json") == {
-        "metadataAttributes": {"tenant_id": "dev"}
+    stored = s3.get_object(Bucket=BUCKET, Key="users/user-a/hand_book.md")["Body"].read()
+    assert stored == b"# Handbook"
+    assert read_json(s3, "users/user-a/hand_book.md.metadata.json") == {
+        "metadataAttributes": {"user_id": "user-a"}
     }
     assert kb.calls == [
         {"knowledgeBaseId": "KB00000000", "dataSourceId": "DS00000000"},
@@ -133,7 +129,7 @@ def test_upload_while_a_sync_runs_keeps_the_file_without_a_job(s3: "S3Client") -
     assert response.status_code == 201
     assert response.json()["ingestion_job_id"] is None
     assert response.json()["graph_ingestion_job_id"] is None
-    assert s3.head_object(Bucket=BUCKET, Key="tenants/dev/a.md")
+    assert s3.head_object(Bucket=BUCKET, Key="users/user-a/a.md")
 
 
 def test_graph_sync_busy_leaves_the_main_sync_running(s3: "S3Client") -> None:
@@ -154,7 +150,7 @@ def test_graph_sync_refused_does_not_fail_the_upload(s3: "S3Client") -> None:
     assert response.status_code == 201
     assert response.json()["ingestion_job_id"] == "JOB0000001"
     assert response.json()["graph_ingestion_job_id"] is None
-    assert s3.head_object(Bucket=BUCKET, Key="tenants/dev/a.md")
+    assert s3.head_object(Bucket=BUCKET, Key="users/user-a/a.md")
 
 
 @pytest.mark.parametrize(
@@ -165,10 +161,10 @@ def test_graph_sync_refused_does_not_fail_the_upload(s3: "S3Client") -> None:
         ("..hidden.md", "hidden.md"),
     ],
 )
-def test_file_name_can_never_leave_the_tenant_folder(s3: "S3Client", raw: str, stored: str) -> None:
+def test_file_name_can_never_leave_the_users_folder(s3: "S3Client", raw: str, stored: str) -> None:
     response = upload(client_using(s3, FakeKb()), raw)
 
-    assert response.json()["key"] == f"tenants/dev/{stored}"
+    assert response.json()["key"] == f"users/user-a/{stored}"
 
 
 # ---------- upload: refused before anything is written ----------
@@ -192,10 +188,13 @@ def test_too_large_is_413(s3: "S3Client", monkeypatch: pytest.MonkeyPatch) -> No
     assert response.status_code == 413
 
 
-def test_bad_tenant_is_400_and_writes_nothing(s3: "S3Client") -> None:
-    response = upload(client_using(s3, FakeKb()), "a.md", headers={"X-Tenant-Id": "no spaces"})
+def test_not_signed_in_is_401_and_writes_nothing(s3: "S3Client") -> None:
+    client = client_using(s3, FakeKb())
+    del app.dependency_overrides[get_user]  # the real check, not the test user
 
-    assert response.status_code == 400
+    response = upload(client, "a.md")
+
+    assert response.status_code == 401
     assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET)
 
 
@@ -209,11 +208,11 @@ def test_sync_refused_for_another_reason_is_502(s3: "S3Client") -> None:
 # ---------- list ----------
 
 
-def test_list_shows_only_this_tenants_files_without_labels(s3: "S3Client") -> None:
-    for key in ("tenants/dev/a.md", "tenants/dev/a.md.metadata.json", "tenants/other/b.md"):
+def test_list_shows_only_this_users_files_without_labels(s3: "S3Client") -> None:
+    for key in ("users/user-a/a.md", "users/user-a/a.md.metadata.json", "users/user-b/b.md"):
         s3.put_object(Bucket=BUCKET, Key=key, Body=b"x")
 
-    response = client_using(s3, FakeKb()).get("/v1/documents", headers=TENANT)
+    response = client_using(s3, FakeKb()).get("/v1/documents")
 
     assert response.status_code == 200
     assert [d["name"] for d in response.json()] == ["a.md"]
@@ -223,7 +222,7 @@ def test_list_shows_only_this_tenants_files_without_labels(s3: "S3Client") -> No
 
 
 def test_sync_status_adds_new_and_modified_as_indexed(s3: "S3Client") -> None:
-    response = client_using(s3, FakeKb()).get("/v1/documents/sync/JOB0000001", headers=TENANT)
+    response = client_using(s3, FakeKb()).get("/v1/documents/sync/JOB0000001")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -238,7 +237,7 @@ def test_sync_status_adds_new_and_modified_as_indexed(s3: "S3Client") -> None:
 def test_sync_status_rejects_a_malformed_job_id(s3: "S3Client") -> None:
     kb = FakeKb()
 
-    response = client_using(s3, kb).get("/v1/documents/sync/not-a-job", headers=TENANT)
+    response = client_using(s3, kb).get("/v1/documents/sync/not-a-job")
 
     assert response.status_code == 422
     assert kb.calls == []

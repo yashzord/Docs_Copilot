@@ -1,6 +1,6 @@
 """Past conversations for the chat sidebar, read from the harness's AgentCore Memory.
 
-    GET /v1/sessions                          this tenant's conversations, newest first
+    GET /v1/sessions                          this user's conversations, newest first
     GET /v1/sessions/{session_id}/messages    one conversation, oldest message first
 
 The harness writes Memory itself. One turn with one search becomes about ten events:
@@ -17,10 +17,10 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel
 
+from app.auth import get_user_id
 from app.aws import get_agentcore, upstream_error
 from app.chat import SESSION_ID_PATTERN
 from app.settings import Settings, get_settings
-from app.tenancy import get_tenant_id
 
 if TYPE_CHECKING:
     from mypy_boto3_bedrock_agentcore import BedrockAgentCoreClient
@@ -43,7 +43,7 @@ class ChatMessage(BaseModel):
 
 @router.get("")
 def list_sessions(
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     settings: Annotated[Settings, Depends(get_settings)],
     client: Annotated["BedrockAgentCoreClient", Depends(get_agentcore)],
 ) -> list[SessionSummary]:
@@ -51,12 +51,12 @@ def list_sessions(
         # ponytail: one page, the first 100 conversations. Paginate when the sidebar needs more.
         # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agentcore/client/list_sessions.html
         response = client.list_sessions(
-            memoryId=settings.memory_id, actorId=tenant_id, maxResults=100
+            memoryId=settings.memory_id, actorId=user_id, maxResults=100
         )
         summaries = [
             SessionSummary(session_id=s["sessionId"], created_at=s["createdAt"], title=title)
             for s in response["sessionSummaries"]
-            if (title := session_title(client, settings.memory_id, tenant_id, s["sessionId"]))
+            if (title := session_title(client, settings.memory_id, user_id, s["sessionId"]))
         ]
     except (ClientError, BotoCoreError) as err:
         raise upstream_error(err, "Listing conversations") from err
@@ -100,15 +100,15 @@ def session_title(
 @router.get("/{session_id}/messages")
 def list_messages(
     session_id: Annotated[str, Path(pattern=SESSION_ID_PATTERN)],
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     settings: Annotated[Settings, Depends(get_settings)],
     client: Annotated["BedrockAgentCoreClient", Depends(get_agentcore)],
 ) -> list[ChatMessage]:
-    # actorId=tenant_id: another tenant's session id finds nothing here.
+    # actorId=user_id: another user's session id finds nothing here.
     request: dict[str, Any] = {
         "memoryId": settings.memory_id,
         "sessionId": session_id,
-        "actorId": tenant_id,
+        "actorId": user_id,
         "includePayloads": True,
         "maxResults": 100,
     }

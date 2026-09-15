@@ -6,8 +6,6 @@ from typing import Any
 
 from botocore.exceptions import ClientError
 
-TENANT = {"X-Tenant-Id": "dev"}
-
 
 def aws_error(code: str) -> ClientError:
     """The exception boto3 raises when AWS answers with an error."""

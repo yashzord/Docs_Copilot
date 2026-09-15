@@ -1,16 +1,20 @@
 """Documents: upload a file, then let the Knowledge Base index it.
 
     POST /v1/documents               upload one file (multipart form, field "file"), start a sync
-    GET  /v1/documents               list this tenant's files
+    GET  /v1/documents               list this user's files
     GET  /v1/documents/sync/{job_id} how that sync is going
 
 Each upload writes two objects to S3:
 
-    tenants/dev/handbook.pdf                  the file
-    tenants/dev/handbook.pdf.metadata.json    {"metadataAttributes": {"tenant_id": "dev"}}
+    users/<user id>/handbook.pdf                  the file
+    users/<user id>/handbook.pdf.metadata.json    {"metadataAttributes": {"user_id": "<user id>"}}
 
-The second one is how the Knowledge Base learns which tenant every chunk of the
-file belongs to, so a search can be filtered to one tenant (docs/learning/aws.md 7.4a).
+The second one is how the Knowledge Base learns which user every chunk of the
+file belongs to, so a search can be limited to `user_id`. Listing already uses
+the S3 prefix. Retrieve is not forced to that filter yet: the Harness still
+searches the whole index; `agent/main.py` injects the filter when that agent
+is the chat path, and a Gateway Cedar policy (lesson 28) would make it
+mandatory. The user id is Cognito's `sub` (lesson 22).
 https://docs.aws.amazon.com/bedrock/latest/userguide/s3-data-source-connector.html
 """
 
@@ -25,9 +29,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Path, UploadFile, status
 from pydantic import BaseModel
 
+from app.auth import get_user_id
 from app.aws import get_kb_admin, get_s3, upstream_error
 from app.settings import Settings, get_settings
-from app.tenancy import get_tenant_id
 
 if TYPE_CHECKING:
     from mypy_boto3_bedrock_agent import AgentsforBedrockClient
@@ -69,15 +73,15 @@ class SyncStatus(BaseModel):
     failure_reasons: list[str]
 
 
-def tenant_prefix(tenant_id: str) -> str:
-    return f"tenants/{tenant_id}/"
+def user_prefix(user_id: str) -> str:
+    return f"users/{user_id}/"
 
 
 def safe_filename(raw: str | None) -> str:
     """Keep only the file's own name, in safe characters.
 
     "../../etc/x.md" or "C:\\docs\\x.md" become "x.md", so a name can never
-    point outside the tenant's folder.
+    point outside the user's folder.
     """
     name = re.split(r"[\\/]", raw or "")[-1]
     name = _UNSAFE_CHARS.sub("_", name).strip("._")[:200]
@@ -105,7 +109,7 @@ def start_sync(kb: "AgentsforBedrockClient", kb_id: str, data_source_id: str) ->
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def upload(
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     file: UploadFile,
     settings: Annotated[Settings, Depends(get_settings)],
     s3: Annotated["S3Client", Depends(get_s3)],
@@ -122,11 +126,11 @@ def upload(
     if file.size is None or file.size > MAX_UPLOAD_BYTES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Files must be 50 MB or smaller.")
 
-    key = tenant_prefix(tenant_id) + name
-    label = {"metadataAttributes": {"tenant_id": tenant_id}}
+    key = user_prefix(user_id) + name
+    label = {"metadataAttributes": {"user_id": user_id}}
     try:
         # The label goes first. If the second write fails, what is left is a label
-        # with no file (harmless), never a file with no tenant.
+        # with no file (harmless), never a file with no user.
         s3.put_object(
             Bucket=settings.s3_bucket,
             Key=f"{key}.metadata.json",
@@ -144,7 +148,7 @@ def upload(
     except (ClientError, BotoCoreError) as err:
         raise upstream_error(err, "Upload") from err
 
-    logger.info("document uploaded tenant=%s bytes=%d", tenant_id, file.size)
+    logger.info("document uploaded user=%s bytes=%d", user_id, file.size)
     job_id = start_sync(kb, settings.kb_id, settings.kb_data_source_id)
     # Both Knowledge Bases read the same bucket, but each only sees new files after
     # its own sync. The graph sync is best effort: the file and the main sync
@@ -159,13 +163,13 @@ def upload(
 
 @router.get("")
 def list_documents(
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     settings: Annotated[Settings, Depends(get_settings)],
     s3: Annotated["S3Client", Depends(get_s3)],
 ) -> list[Document]:
-    prefix = tenant_prefix(tenant_id)
+    prefix = user_prefix(user_id)
     try:
-        # ponytail: one page, so the first 1,000 objects. Paginate when a tenant has more.
+        # ponytail: one page, so the first 1,000 objects. Paginate when a user has more.
         response = s3.list_objects_v2(Bucket=settings.s3_bucket, Prefix=prefix)
     except (ClientError, BotoCoreError) as err:
         raise upstream_error(err, "Listing documents") from err
@@ -184,11 +188,11 @@ def list_documents(
 def sync_status(
     # Ingestion job ids are 10 capital letters and digits, e.g. JL5NEA0617.
     job_id: Annotated[str, Path(pattern=r"^[A-Z0-9]{10}$")],
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     settings: Annotated[Settings, Depends(get_settings)],
     kb: Annotated["AgentsforBedrockClient", Depends(get_kb_admin)],
 ) -> SyncStatus:
-    # A sync covers the whole bucket, not one tenant, so any tenant may ask about it.
+    # A sync covers the whole bucket, not one user, so any signed-in user may ask about it.
     # It only reveals counts, never names or content.
     try:
         job = kb.get_ingestion_job(

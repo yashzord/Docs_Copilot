@@ -5,9 +5,11 @@
 // the current conversation), events (typing, clicking) and streaming fetch.
 // https://nextjs.org/docs/app/getting-started/server-and-client-components
 
-import { type FormEvent, Fragment, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, Fragment, type KeyboardEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import Sidebar from "@/components/Sidebar";
+import { apiFetch } from "@/lib/api";
+import { accessToken, currentEmail, isConfigured, signIn, signOut } from "@/lib/auth";
 import { type Inline, parseMarkdown } from "@/lib/markdown";
 import { createSseParser } from "@/lib/sse";
 
@@ -33,6 +35,11 @@ export default function Chat() {
   const [usage, setUsage] = useState<Usage | null>(null);
   // Bumped when a new conversation starts, so the sidebar reloads its list.
   const [sessionsVersion, setSessionsVersion] = useState(0);
+  // The token lives in the browser's sessionStorage, which the server does not have.
+  // useSyncExternalStore reads it the React way: undefined on the server (render
+  // nothing), the real value once the browser takes over. No effect, no flash.
+  // https://react.dev/reference/react/useSyncExternalStore
+  const token = useSyncExternalStore(noSubscribe, accessToken, () => undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the newest words in view while they stream in.
@@ -59,7 +66,7 @@ export default function Chat() {
 
     try {
       // Only the new message goes up. The agent keeps the history in AgentCore Memory.
-      const response = await fetch("/api/chat", {
+      const response = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, session_id: sessionId }),
@@ -110,7 +117,7 @@ export default function Chat() {
     if (busy) return;
     setError(null);
     setUsage(null);
-    const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`);
+    const response = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/messages`);
     if (!response.ok) {
       setError(await describeFailure(response));
       return;
@@ -141,6 +148,10 @@ export default function Chat() {
     }
   }
 
+  if (token === undefined) return null;
+  if (!token) return <SignIn />;
+  const email = currentEmail();
+
   return (
     <div className="flex h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <Sidebar
@@ -152,9 +163,17 @@ export default function Chat() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-          <h1 className="text-lg font-semibold">Docs Copilot</h1>
-          <p className="text-sm text-zinc-500">Answers from your documents, with sources</p>
+        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+          <div>
+            <h1 className="text-lg font-semibold">Docs Copilot</h1>
+            <p className="text-sm text-zinc-500">Answers from your documents, with sources</p>
+          </div>
+          <div className="flex items-center gap-3 text-sm text-zinc-500">
+            {email && <span>{email}</span>}
+            <button type="button" onClick={signOut} className="rounded-lg border border-zinc-300 px-3 py-1.5 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+              Sign out
+            </button>
+          </div>
         </header>
 
         {/* aria-live: screen readers announce new text as it arrives. */}
@@ -226,6 +245,34 @@ export default function Chat() {
         </form>
       </div>
     </div>
+  );
+}
+
+// sessionStorage never notifies changes; the page reloads after sign-in and sign-out anyway.
+function noSubscribe() {
+  return () => {};
+}
+
+/** The screen before sign-in. One button, which leaves for Cognito's login page. */
+function SignIn() {
+  return (
+    <main className="flex h-dvh flex-col items-center justify-center gap-4 bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <h1 className="text-2xl font-semibold">Docs Copilot</h1>
+      <p className="text-zinc-500">Your documents, your chats, your memory. Sign in to start.</p>
+      {isConfigured() ? (
+        <button
+          type="button"
+          onClick={() => void signIn()}
+          className="rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white hover:bg-indigo-500"
+        >
+          Sign in
+        </button>
+      ) : (
+        <p className="text-sm text-red-700">
+          Login is not configured: set NEXT_PUBLIC_COGNITO_DOMAIN and NEXT_PUBLIC_COGNITO_CLIENT_ID in frontend/.env.local.
+        </p>
+      )}
+    </main>
   );
 }
 

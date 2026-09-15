@@ -38,6 +38,22 @@ class Settings(BaseSettings):
     harness_arn: str
     memory_id: str
 
+    # Login: the Cognito user pool that signs users in, and the app client the
+    # page uses. Both are public identifiers, not secrets (lesson 22).
+    cognito_user_pool_id: str
+    cognito_client_id: str
+
+    @property
+    def cognito_issuer(self) -> str:
+        # The `iss` claim every token from this pool carries.
+        # https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-access-token.html
+        return f"https://cognito-idp.{self.aws_region}.amazonaws.com/{self.cognito_user_pool_id}"
+
+    @property
+    def cognito_jwks_url(self) -> str:
+        # Where the pool publishes the public keys that verify its signatures.
+        return f"{self.cognito_issuer}/.well-known/jwks.json"
+
 
 @lru_cache
 def get_settings() -> Settings:

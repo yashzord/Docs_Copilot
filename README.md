@@ -12,23 +12,24 @@ with a sidebar: link at the top of that file.
 
 ## 1. What I'm building
 
-A single-user app where you upload documents, ask questions, and get
-answers that point to the exact passages they came from. One agent (an
-AgentCore Harness) answers every question and picks a tool for each one:
-the document search, a knowledge-graph search for "how does X relate to
-Y", or a real web browser for a URL. It remembers past chats and your
-stated preferences.
+A signed-in app where you upload documents, ask questions, and get
+answers that point to the exact passages they came from. Cognito's hosted
+page is the login. One agent (an AgentCore Harness) answers every question
+and picks a tool for each one: the document search, a knowledge-graph
+search for "how does X relate to Y", or a real web browser for a URL. It
+remembers past chats and your stated preferences, per person.
 
 The goal is to learn how production AI systems are really built: RAG,
 agents, AWS managed services, one working piece at a time.
 
 ### What a user can do
 
-1. Upload documents (PDF, markdown, text, Word, CSV, HTML).
-2. Ask a question, watch the answer stream in, open the numbered source cards.
-3. Give a URL: the agent reads the live page.
-4. Ask how two things relate: the agent searches the knowledge graph.
-5. Come back later: past chats are in the sidebar, and the agent remembers stated preferences.
+1. Sign in on Cognito's hosted page (the app never sees a password).
+2. Upload documents (PDF, markdown, text, Word, CSV, HTML).
+3. Ask a question, watch the answer stream in, open the numbered source cards.
+4. Give a URL: the agent reads the live page.
+5. Ask how two things relate: the agent searches the knowledge graph.
+6. Come back later: past chats are in the sidebar, and the agent remembers stated preferences.
 
 A line above each answer shows which tool the agent used.
 
@@ -40,7 +41,7 @@ A line above each answer shows which tool the agent used.
 | Documents tool | the managed Knowledge Base, exposed through Gateway as `Retrieve` | D2 |
 | Browser tool | AgentCore Browser: the agent reads live web pages | D3 |
 | Graph tool | the GraphRAG Knowledge Base on Neptune, behind the Gateway | D4 |
-| Research agent | a Strands agent on AgentCore Runtime, called through the Gateway | later |
+| Research agent | a Strands agent on AgentCore Runtime (`agent/`, not wired to chat yet) | later |
 
 ### How agents use tools
 
@@ -74,7 +75,7 @@ not just how to switch them on.
 
 ### Production-shaped, on purpose
 
-- **Single user, on purpose:** no login. Multi-tenancy was dropped to finish the product end to end; a fixed tenant stub (`dev`) remains.
+- **Signed in:** Cognito hosted login (PKCE). Files and Memory are per user (`sub`). Document Retrieve is not yet forced to that user (Harness still searches the whole index).
 - **Streaming:** answers appear word by word, end to end.
 - **Checked:** typed, linted, tested in CI; an eval set may score answer quality later.
 - **Costed:** tokens and cost tracked per answer.
@@ -90,13 +91,16 @@ not just how to switch them on.
 
 ```mermaid
 flowchart LR
-    U[You] --> F[frontend<br/>web page]
-    F --> B[backend<br/>API server]
-    B --> H[AgentCore Harness<br/>the agent: model + tools + memory]
+    U[You] --> C[Cognito<br/>hosted login]
+    C --> F[frontend<br/>web page]
+    F -->|Bearer access token| B[backend<br/>verifies JWT]
+    B -->|same token| H[AgentCore Harness<br/>JWT authorizer]
     H --> G[AgentCore Gateway<br/>tools over MCP]
     G --> K[Knowledge Bases<br/>documents + knowledge graph]
     H --> T[Browser<br/>live web pages]
-    H --> M[(AgentCore Memory<br/>chat history + facts)]
+    H --> M[(AgentCore Memory<br/>per Cognito sub)]
+    B -->|IAM| S[(S3<br/>users/sub/)]
+    B -->|IAM| M
 ```
 
 ---
@@ -114,13 +118,14 @@ uv run mypy .               3. typecheck
 uv run pytest               4. tests
 uv run uvicorn app.main:app --reload --port 8001    start the API on http://localhost:8001
 
-# frontend (first time: cp .env.example .env.local, set API_URL to the backend's port)
+# frontend (first time: cp .env.example .env.local)
+# set API_URL, NEXT_PUBLIC_COGNITO_DOMAIN, NEXT_PUBLIC_COGNITO_CLIENT_ID
 cd frontend
 npm install                 install packages (first time, or after package.json changes)
 npm run dev                 start the web page on http://localhost:3000
 npm run lint                lint
 npm run typecheck           check types
-npm test                    stream parser and citation tests
+npm test                    stream parser, citations, PKCE hash
 
 ```
 
@@ -130,16 +135,17 @@ npm test                    stream parser and citation tests
 
 ```
 frontend/            web page (Next.js, TypeScript, Tailwind)
-  app/               the page, and one proxy route /api/[...path]       D1, D2
-  components/        Chat (answers, sources) and Sidebar (chats, docs)  D1, D2
-  lib/               stream parser, citation splitter + their tests    D1, D2
+  app/               the page, /callback (Cognito), and proxy /api/[...path]
+  components/        Chat (sign-in, answers, sources) and Sidebar
+  lib/               stream parser, citations, apiFetch + PKCE sign-in
 backend/             one Python project: pyproject.toml, uv.lock, .env
-  app/               the API server (FastAPI): upload, chat relay, sessions   D1+
-  prompts/           the harness system prompt (pasted into the console)     D2
-  tests/             pytest tests                                       D1+
+  app/               the API server (FastAPI): JWT check, upload, chat relay, sessions
+  prompts/           the harness system prompt (pasted into the console)
+  tests/             pytest tests
+agent/               Strands agent for AgentCore Runtime (not on the chat path yet)
 infra/
-  iam/               IAM policies, kept as documentation                D2
-  lambda/graph_search/  the graph search Lambda + its tool schema       D4
+  iam/               IAM policies, kept as documentation
+  lambda/graph_search/  the graph search Lambda + its tool schema
 docs/                course.md (the crash course) and demo.md (the demo script)
 ```
 
@@ -158,8 +164,9 @@ Kubernetes files yet (later/maybe).
 [x] D3  Browser tool on the Harness; long-term memory (facts, preferences)
 [x] D4  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (graph stopped when idle, deleted after the demo)
 
-then   stop and review; reverse-learning pass: trace one question end to end, break things on purpose
-later  maybe: research agent (Strands on Runtime); Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
+now    Cognito login; files and Memory per user; KB Retrieve still searches the whole index
+then   reverse-learning pass; optional Cedar filter / wire `agent/`
+later  maybe: research agent as the chat path; Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
 ```
 
 ---
@@ -175,7 +182,7 @@ Decided once, with numbers checked. Not reopened without a reason.
 | Bedrock GraphRAG on Neptune Analytics, stopped when idle, deleted after the demo | Neo4j + our own extraction | AWS-native and quick to set up; $0.48 an hour running (16 m-NCU), about $0.05 stopped |
 | No NAT Gateway | private subnets + NAT | $32 a month for nothing we need |
 | No Redis | Redis for rate limits | one server process; a counter in memory would be enough |
-| No login, single user | Cognito + per-tenant search filter | finish the product end to end first; the tenant label code stays as a stub |
+| Cognito hosted login + PKCE | no login / `dev` stub | reopen after D4: each person gets their own files and Memory actor; KB Retrieve filter still open |
 | Knowledge Base's managed embedding model | Titan or Cohere chosen by us | the built-in reranker only works with the managed embeddings |
 | Models reached through Bedrock (Converse) | Anthropic SDK | one request shape for every model; since D2 the Harness makes the model calls and our code calls InvokeHarness |
 | Nothing deployed: runs locally | always-on hosting | the app runs on the laptop; only managed AWS services bill, per use (Neptune by the hour) |
@@ -200,7 +207,7 @@ only, not the old 12-month free services. No EKS. No OpenSearch Serverless.
 1. Hyphens only, never em dashes, in any file.
 2. Every non-obvious library call gets a one-line `# <docs url>` comment.
 3. A deliberate shortcut gets a `# ponytail:` comment naming its limit and the upgrade path.
-4. No login: `tenant_id` is a fixed stub (`dev`) set by the Next.js proxy. It is still validated at the API because it becomes the Memory actor id.
+4. Login: the page sends `Authorization: Bearer <access token>`. FastAPI verifies it (JWKS, expiry, issuer, access token, app client). Cognito `sub` is the Memory actor id and the S3 prefix `users/<sub>/`.
 5. No secrets in git. `.env` is ignored, `.env.example` is committed.
 
 Also: tests cover the happy path and the failure path. AWS is faked in

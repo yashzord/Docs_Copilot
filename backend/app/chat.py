@@ -29,9 +29,9 @@ from fastapi import APIRouter, Depends
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
-from app.aws import get_agentcore, upstream_error
+from app.auth import User, get_user, get_user_id
+from app.aws import harness_client, upstream_error
 from app.settings import Settings, get_settings
-from app.tenancy import get_tenant_id
 
 if TYPE_CHECKING:
     from mypy_boto3_bedrock_agentcore import BedrockAgentCoreClient
@@ -60,12 +60,17 @@ def session_id_for(request: ChatRequest) -> str:
     return request.session_id or str(uuid.uuid4())
 
 
+def get_harness(user: Annotated[User, Depends(get_user)]) -> "BedrockAgentCoreClient":
+    # A dependency of its own, so tests can swap the client for a fake.
+    return harness_client(user.token)
+
+
 def harness_stream(
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user: Annotated[User, Depends(get_user)],
     request: ChatRequest,
     session_id: Annotated[str, Depends(session_id_for)],
     settings: Annotated[Settings, Depends(get_settings)],
-    client: Annotated["BedrockAgentCoreClient", Depends(get_agentcore)],
+    client: Annotated["BedrockAgentCoreClient", Depends(get_harness)],
 ) -> Iterable["InvokeHarnessStreamOutputTypeDef"]:
     """Open the agent's stream before the response starts, so a refusal can
     still become a real 503 or 502 (same reason as in D1, docs/learning/D1.md)."""
@@ -74,10 +79,11 @@ def harness_stream(
         response = client.invoke_harness(
             harnessArn=settings.harness_arn,
             runtimeSessionId=session_id,
-            # Memory is stored per actor and session, so one tenant can never load
-            # another tenant's conversation by guessing a session id.
-            # ponytail: one actor per tenant. With a login, it would be the signed-in user.
-            actorId=tenant_id,
+            # Memory is stored per actor and session, so one user can never load
+            # another user's conversation by guessing a session id. The id comes
+            # from the verified token, never from anything the page could type.
+            actorId=user.id,
+            runtimeUserId=user.id,
             messages=[{"role": "user", "content": [{"text": request.message}]}],
         )
     except (ClientError, BotoCoreError) as err:
@@ -174,7 +180,7 @@ def relay(events: Iterable["InvokeHarnessStreamOutputTypeDef"]) -> Iterator[Serv
 
 @router.post("/v1/chat", response_class=EventSourceResponse)
 def chat(
-    tenant_id: Annotated[str, Depends(get_tenant_id)],
+    user_id: Annotated[str, Depends(get_user_id)],
     session_id: Annotated[str, Depends(session_id_for)],
     events: Annotated[Iterable["InvokeHarnessStreamOutputTypeDef"], Depends(harness_stream)],
 ) -> Iterator[ServerSentEvent]:
@@ -189,10 +195,10 @@ def chat(
                 return
             if sse.event == "usage":
                 # One line per answer: who, how many tokens. Never the text.
-                logger.info("chat completed tenant=%s usage=%s", tenant_id, sse.data)
+                logger.info("chat completed user=%s usage=%s", user_id, sse.data)
     except (ClientError, BotoCoreError) as err:
         # The 200 is already sent, so the failure can only be reported inside the stream.
-        logger.warning("assistant stream broke tenant=%s error=%s", tenant_id, type(err).__name__)
+        logger.warning("assistant stream broke user=%s error=%s", user_id, type(err).__name__)
         yield ServerSentEvent(
             event="error", data={"message": "The assistant stopped unexpectedly."}
         )

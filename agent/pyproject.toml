@@ -1,0 +1,23 @@
+# The Docs Copilot agent: a Strands agent that runs on Amazon Bedrock AgentCore Runtime.
+# A separate uv project from backend/: it is built into its own container.
+[project]
+name = "docs-copilot-agent"
+version = "0.1.0"
+description = "Strands agent on AgentCore Runtime: documents, graph, browser, memory, per-user"
+requires-python = ">=3.12"
+dependencies = [
+    "bedrock-agentcore>=1.22,<1.23",
+    "mcp>=2.1.1",
+    "strands-agents>=1.55.1",
+    "strands-agents-tools[agent-core-browser]>=0.8.8",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.12", "mypy>=1.16", "pytest>=8"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "S", "SIM", "RUF", "B", "UP"]

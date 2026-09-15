@@ -62,7 +62,7 @@ if __name__ == "__main__":
                 "retrievalResults": [
                     {
                         "content": {"text": "The Gateway exposes tools."},
-                        "location": {"s3Location": {"uri": "s3://bucket/tenants/dev/aws.md"}},
+                        "location": {"s3Location": {"uri": "s3://bucket/users/user-a/aws.md"}},
                         "score": 0.7,
                     }
                 ]

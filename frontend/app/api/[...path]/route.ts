@@ -31,14 +31,15 @@ async function forward(request: NextRequest, ctx: RouteContext<"/api/[...path]">
   }
   const target = `${apiUrl}/v1/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
 
-  const headers = new Headers({
-    // ponytail: one fixed demo tenant. Ceiling: every browser is the same tenant.
-    // Upgrade: take the tenant from a login session (the project has no login).
-    "X-Tenant-Id": "dev",
-  });
-  // Keeps the multipart boundary for uploads ("multipart/form-data; boundary=...").
-  const contentType = request.headers.get("content-type");
-  if (contentType) headers.set("Content-Type", contentType);
+  // Only two headers cross to the backend: the signed-in person's token, which
+  // FastAPI verifies (lesson 22), and the content type, which keeps the multipart
+  // boundary for uploads ("multipart/form-data; boundary=..."). Nothing else from
+  // the browser's request is forwarded.
+  const headers = new Headers();
+  for (const name of ["authorization", "content-type"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
 
   let upstream: Response;
   try {

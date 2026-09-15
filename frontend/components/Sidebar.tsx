@@ -5,6 +5,8 @@
 
 import { type ChangeEvent, useEffect, useState } from "react";
 
+import { apiFetch } from "@/lib/api";
+
 // title: the chat's first question, made by the backend. Older chats may have none.
 type Session = { session_id: string; created_at: string; title?: string | null };
 type Doc = { name: string; size: number; last_modified: string };
@@ -56,7 +58,7 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
       // https://developer.mozilla.org/en-US/docs/Web/API/FormData
       const form = new FormData();
       form.append("file", file);
-      const response = await fetch("/api/documents", { method: "POST", body: form });
+      const response = await apiFetch("/api/documents", { method: "POST", body: form });
       const body = (await response.json()) as {
         ingestion_job_id?: string | null;
         graph_ingestion_job_id?: string | null;
@@ -165,7 +167,7 @@ export default function Sidebar({ activeSessionId, sessionsVersion, disabled, on
 /** GET some JSON, or null if the request failed. */
 async function getJson<T>(url: string): Promise<T | null> {
   try {
-    const response = await fetch(url);
+    const response = await apiFetch(url);
     return response.ok ? ((await response.json()) as T) : null;
   } catch {
     return null;

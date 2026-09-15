@@ -12,10 +12,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.aws import get_agentcore
+from app.auth import get_user
+from app.chat import get_harness
 from app.main import app
 from tests.conftest import TEST_SETTINGS
-from tests.helpers import TENANT, FakeAgentCore, aws_error, parse_sse
+from tests.helpers import FakeAgentCore, aws_error, parse_sse
 
 SESSION = "s" * 40
 RESULT = json.dumps(
@@ -23,7 +24,7 @@ RESULT = json.dumps(
         "retrievalResults": [
             {
                 "content": {"text": "Neptune costs $3.51 an hour", "type": "TEXT"},
-                "metadata": {"_document_title": "README.md", "tenant_id": "dev"},
+                "metadata": {"_document_title": "README.md", "user_id": "user-a"},
                 "score": 0.61234,
             }
         ]
@@ -103,14 +104,12 @@ HAPPY_EVENTS: list[dict[str, Any]] = [
 
 
 def client_using(fake: FakeAgentCore) -> TestClient:
-    app.dependency_overrides[get_agentcore] = lambda: fake
+    app.dependency_overrides[get_harness] = lambda: fake
     return TestClient(app)
 
 
-def ask(
-    fake: FakeAgentCore, body: dict[str, Any] | None = None, headers: dict[str, str] = TENANT
-) -> Any:
-    return client_using(fake).post("/v1/chat", headers=headers, json=body or {"message": "why?"})
+def ask(fake: FakeAgentCore, body: dict[str, Any] | None = None) -> Any:
+    return client_using(fake).post("/v1/chat", json=body or {"message": "why?"})
 
 
 # ---------- happy path ----------
@@ -140,7 +139,7 @@ def test_streams_session_tool_sources_answer_usage_done() -> None:
     assert data[5] == {"input_tokens": 3300, "output_tokens": 280, "model_calls": 2}
 
 
-def test_sends_the_harness_session_tenant_and_message() -> None:
+def test_sends_the_harness_session_user_and_message() -> None:
     fake = FakeAgentCore(stream=HAPPY_EVENTS)
 
     ask(fake, {"message": "why?", "session_id": SESSION})
@@ -151,7 +150,8 @@ def test_sends_the_harness_session_tenant_and_message() -> None:
             {
                 "harnessArn": TEST_SETTINGS.harness_arn,
                 "runtimeSessionId": SESSION,
-                "actorId": "dev",
+                "actorId": "user-a",
+                "runtimeUserId": "user-a",
                 "messages": [{"role": "user", "content": [{"text": "why?"}]}],
             },
         )
@@ -194,14 +194,17 @@ def test_a_tool_result_that_is_not_a_search_gives_no_sources() -> None:
 
 
 @pytest.mark.parametrize(
-    "headers", [{}, {"X-Tenant-Id": "has space"}, {"X-Tenant-Id": "_starts-badly"}]
+    "headers", [{}, {"Authorization": "Basic abc"}, {"Authorization": "Bearer not.a.jwt"}]
 )
-def test_bad_tenant_header_is_400_and_costs_nothing(headers: dict[str, str]) -> None:
+def test_no_valid_token_is_401_and_costs_nothing(headers: dict[str, str]) -> None:
     fake = FakeAgentCore(stream=HAPPY_EVENTS)
+    client = client_using(fake)
+    del app.dependency_overrides[get_user]  # the real check, not the test user
 
-    response = ask(fake, headers=headers)
+    response = client.post("/v1/chat", headers=headers, json={"message": "why?"})
 
-    assert response.status_code == 400
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
     assert fake.calls == []
 
 
@@ -218,7 +221,7 @@ def test_bad_tenant_header_is_400_and_costs_nothing(headers: dict[str, str]) -> 
 def test_invalid_request_is_422_and_costs_nothing(body: dict[str, Any]) -> None:
     fake = FakeAgentCore(stream=HAPPY_EVENTS)
 
-    response = client_using(fake).post("/v1/chat", headers=TENANT, json=body)
+    response = client_using(fake).post("/v1/chat", json=body)
 
     assert response.status_code == 422
     assert fake.calls == []

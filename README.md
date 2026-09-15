@@ -10,6 +10,11 @@ with a sidebar: link at the top of that file.
 
 ---
 
+### Branches
+
+- `main`: the working version described in this README. Single user, the AgentCore Harness answers.
+- `feat/login-runtime-agent`: in progress. Cognito login, documents private per user, and a Strands agent on AgentCore Runtime replacing the Harness. Its own README and docs/course.md describe that version.
+
 ## 1. What I'm building
 
 A single-user app where you upload documents, ask questions, and get

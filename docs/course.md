@@ -21,7 +21,7 @@ Check yourself   questions to answer without looking
 
 The "Try it" steps use what is in your AWS account right now: the Secure
 Transfers guide you uploaded and the chats you had with it. Outputs were
-captured on 2026-09-11 and 2026-09-13. Steps marked **(app running)** need
+captured on 2026-09-11, 2026-09-13 and 2026-09-15. Steps marked **(app running)** need
 the backend and the page started (lesson 26 has the commands). Steps marked
 **(graph running)** need the Neptune graph started (lesson 15). Stop the
 graph when you finish for the day: it bills by the hour.
@@ -37,8 +37,8 @@ flowchart LR
     subgraph L[Your laptop]
         B[Chat window<br/>Chat.tsx] --> P[Proxy<br/>route.ts] --> F[Backend<br/>FastAPI]
     end
-    subgraph A[The agent, run by AWS]
-        H[Harness<br/>the loop] --> M[Model<br/>Mistral Large 3]
+        subgraph A[The agent, hosted by AWS Runtime]
+        H[agent/src/main.py<br/>Strands loop + filter hook] --> M[Model<br/>Mistral Large 3]
         H --> Me[(Memory<br/>chats, preferences)]
         H --> W[Browser<br/>a real Chrome]
     end
@@ -50,8 +50,9 @@ flowchart LR
         K[Knowledge Base<br/>chunk search]
         GK[Graph Knowledge Base] --> N[(Neptune<br/>the graph)]
     end
-    F -->|InvokeHarness| H
-    H -->|tool calls| G
+        C[Cognito<br/>login] -.token.-> B
+    F -->|token| H
+    H -->|tool calls, token| G
     G --> K
     La --> GK
     F -->|upload| S
@@ -62,8 +63,8 @@ flowchart LR
 If you remember only three sentences, remember these:
 
 1. **The page talks only to our backend.** The chat window calls a small proxy, which calls our FastAPI server on your laptop. Nothing in the browser talks to AWS.
-2. **The backend hands your question to an agent that AWS runs.** The Harness loops: ask the model, run the tool it wants, give it the result, ask again, until it has an answer. The answer streams back piece by piece.
-3. **Every AWS call is made by some identity, and that identity needs permission for exactly that call.** Almost every AWS error you will see is one of these missing one permission.
+2. **The backend hands your question, and your login token, to our agent that AWS hosts.** The agent loops: ask the model, run the tool it wants, give it the result, ask again, until it has an answer. The answer streams back piece by piece.
+3. **Every call is made by some identity, and that identity needs permission for exactly that call.** Your login token is one identity, checked three times on its way; AWS roles are the others. Almost every AWS error you will see is one of these missing one permission.
 
 An **interactive map** of the same system lives here:
 https://claude.ai/code/artifact/b6c44e72-b148-49bc-9011-4a5d4da730d2
@@ -158,7 +159,7 @@ you type:   cd ~/Projects/personal/Docs_Copilot        "go to the project folder
 you type:   ls                                          "what is here?"
 it prints:  README.md  backend  docs  frontend  infra
 you type:   ls backend/app                              "what is inside backend/app?"
-it prints:  __init__.py  aws.py  chat.py  documents.py  main.py  sessions.py  settings.py  tenancy.py
+it prints:  __init__.py  auth.py  aws.py  chat.py  documents.py  main.py  sessions.py  settings.py
 ```
 
 **In our project**
@@ -412,7 +413,7 @@ reply.
 client (browser, curl)                                server (our API)
 
   POST /v1/chat                    ---- request ---->
-  headers: X-Tenant-Id: dev
+  headers: Authorization: Bearer <your login token>
            Content-Type: application/json
   body:    {"message": "How do I enable MFA?", "session_id": null}
 
@@ -435,7 +436,7 @@ Status codes this project uses:
 |---|---|---|
 | 200 | OK | worked, the answer follows |
 | 201 | Created | a file was uploaded |
-| 400 | Bad Request | the tenant header is missing or malformed |
+| 401 | Unauthorized | no login token, or one that failed a check (lesson 22) |
 | 404 | Not Found | the proxy refused a path it does not know (lesson 7) |
 | 413 | Content Too Large | an upload over 50 MB |
 | 415 | Unsupported Media Type | an upload that is not pdf, md, txt, html, docx or csv |
@@ -486,15 +487,14 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8001/v1/chat \
   -H 'Content-Type: application/json' -d '{"message":"hi"}'
 ```
 
-prints `400`: the tenant header was missing, so the server refused before
-doing anything. The `-w "%{http_code}"` part asks curl to print only the
+prints `401`: no login token, so the server refused before doing anything. The `-w "%{http_code}"` part asks curl to print only the
 status code.
 
 **Check yourself**
 
 1. Name the five parts of a request and response.
 2. What is the difference between a 4xx and a 5xx?
-3. A request with no `X-Tenant-Id` header: which code comes back?
+3. A request with no `Authorization` header: which code comes back?
 
 ---
 
@@ -534,23 +534,23 @@ error is clearer, and AWS never sees junk.
 **2. It runs dependencies.** A **dependency** is a function FastAPI runs
 before your endpoint and hands the result to it. You ask for one with
 `Depends(...)`. They run in order, and any of them can stop the request
-with an error status. So the tenant check runs first, and a bad header is
+with an error status. So the login check runs first, and a bad token is
 rejected before a paid AWS call.
 
 ```mermaid
 flowchart LR
-    R[request arrives] --> T[get_tenant_id<br/>check the header]
+    R[request arrives] --> T[get_user<br/>verify the token]
     T --> I[session_id_for<br/>new id or the given one]
-    I --> S[harness_stream<br/>open the agent's stream]
+    I --> S[agent_events<br/>open the agent's stream]
     S --> C[chat<br/>send the events]
-    T -.400.-> X[response sent,<br/>nothing else runs]
+    T -.401.-> X[response sent,<br/>nothing else runs]
     S -.502 or 503.-> X
 ```
 
 Dependencies have a second gift: in tests, you can **swap** any of them
-for a fake. `app.dependency_overrides[get_agentcore] = lambda: fake` makes
-every route use a fake AWS client that costs nothing. That is how all 38
-backend tests run without an AWS account.
+for a fake. `app.dependency_overrides[get_http] = fake.client` makes the chat route talk
+to a fake Runtime that costs nothing. That is how all 54 backend tests run
+without an AWS account.
 
 **Two kinds of function.** A FastAPI endpoint can be `def` or `async def`.
 `async def` says "I will tell you when I am waiting, serve others
@@ -579,7 +579,7 @@ backend/app/main.py        creates the app, plugs in the three route files, /hea
 backend/app/chat.py        POST /v1/chat
 backend/app/documents.py   the three /v1/documents routes
 backend/app/sessions.py    the two /v1/sessions routes
-backend/app/tenancy.py     the dependency that reads and checks X-Tenant-Id
+backend/app/auth.py        the dependency that verifies the login token and gives the user id
 backend/app/settings.py    reads backend/.env into a typed Settings object
 backend/app/aws.py         one AWS client per service (shared), and one error mapper
 ```
@@ -589,7 +589,8 @@ at the bottom (the endpoint), and see how its parameters each say
 `Depends(...)`.
 
 **Settings.** `settings.py` reads `backend/.env`: the AWS profile, the
-region, and seven IDs from the AWS console. Real environment variables win
+region, and the IDs from the AWS console: the bucket, the two Knowledge
+Bases, the agent's Runtime, the memory, the Cognito pool and app client. Real environment variables win
 over the file, so a server on AWS could set them without any file. A typo
 key in the file is a startup error, on purpose: a mistake fails loudly at
 start, not quietly at 2 am.
@@ -604,7 +605,7 @@ that failed.
 **Check yourself**
 
 1. What happens to a request whose body breaks a rule, and does your function run?
-2. Why is the tenant check a dependency instead of a line inside `chat()`?
+2. Why is the login check a dependency instead of a line inside `chat()`?
 3. Why is `chat` a `def` and not an `async def`?
 
 ---
@@ -706,8 +707,8 @@ the caller gets a plain sentence.
 
 `backend/app/chat.py`, three functions:
 
-- `harness_stream`: the dependency that opens the agent's stream (and turns a refusal into 502 or 503).
-- `relay`: turns the agent's raw events into our seven (lesson 17 shows the raw ones).
+- `agent_events`: the dependency that opens the agent's stream with your token (and turns a refusal into 401, 502 or 503).
+- `relay`: turns the agent's events into our seven (lesson 17 shows the agent's side).
 - `chat`: the endpoint. Sends `session` first, then everything `relay` yields, then `done`.
 
 `backend/app/aws.py`, `upstream_error`: the one place every AWS failure is
@@ -719,11 +720,12 @@ anything else becomes 502.
 Watch the raw stream the page normally hides:
 
 ```
-curl -N -X POST localhost:8001/v1/chat -H 'X-Tenant-Id: dev' \
+curl -N -X POST localhost:8001/v1/chat -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"message":"steps to enable MFA for a user?"}'
 ```
 
-`-N` tells curl not to buffer, so pieces show as they arrive. You see
+(`$TOKEN` comes from lesson 22's Try it.) `-N` tells curl not to buffer, so
+pieces show as they arrive. You see
 `event: session`, then `event: tool`, `event: sources`, many `event: delta`
 lines, `event: usage`, `event: done`.
 
@@ -751,7 +753,10 @@ frontend/app/
 frontend/components/
   Chat.tsx                  the conversation: sending, reading the stream, sources
   Sidebar.tsx               past conversations, upload, sync status
+  callback/page.tsx         where Cognito sends you back after sign-in (lesson 22)
 frontend/lib/
+  auth.ts                   sign-in with Cognito (PKCE), the token, sign-out
+  api.ts                    fetch with the token; a 401 means sign in again
   sse.ts                    turns streamed text into events
   citations.ts              finds [1] markers in an answer
   markdown.ts               bold, lists and code in an answer
@@ -771,7 +776,7 @@ and passes the answer back untouched. This pattern is called a **BFF**
 
 1. **Same origin.** The page and `/api/...` share one address, so the browser's cross-site rules (CORS) never come up.
 2. **The backend address stays on the server.** `API_URL` lives in `frontend/.env.local` without a `NEXT_PUBLIC_` prefix, so it is never sent to browsers.
-3. **One place to add headers.** The tenant header `X-Tenant-Id: dev` is added here.
+3. **One place to control headers.** Only two cross to the backend: your login token (`Authorization`) and the body's `Content-Type`. Nothing else the browser sends.
 
 The folder is named `[...path]`, a **catch-all**: it matches any number of
 URL parts and hands them to the code as a list. `/api/documents/sync/ABC`
@@ -803,7 +808,7 @@ the server makes one and sends it back in the first event.
 
 Open `frontend/app/api/[...path]/route.ts`. It is one function, `forward`,
 about 50 lines: read `API_URL`, check the allowlist, build the target URL,
-add the tenant header, keep the incoming `Content-Type` (an upload's
+forward the `Authorization` header, keep the incoming `Content-Type` (an upload's
 boundary must survive), forward, hand the body back as a stream.
 
 Then `frontend/components/Chat.tsx`, the function `send()`: the `fetch`,
@@ -948,9 +953,11 @@ Gateway's role, not yours.
 
 | Identity | Kind | Made by | May do |
 |---|---|---|---|
-| `yashubitra` (profile `docs-copilot-dev`) | IAM user | you | everything (`AdministratorAccess`). The backend calls S3, the Knowledge Base, the Harness and Memory as this user |
-| Harness role `AmazonBedrockAgentCoreHarnessDefaultServiceRole-yhy2p` | role | the console when the harness was created | call Bedrock models; call our Gateway; read and write its memory; use the browser |
-| Gateway role `AmazonBedrockAgentCoreGatewayDefaultServiceRole1789098437928` | role | the console when the gateway was created | search the managed Knowledge Base; plus one line we added: invoke the graph search Lambda |
+| `yashubitra` (profile `docs-copilot-dev`) | IAM user | you | everything (`AdministratorAccess`). The backend calls S3, the Knowledge Base and Memory as this user |
+| the signed-in person | Cognito token, not IAM | Cognito, at sign-in | call the agent, call the Gateway: as *this person*, checked by each (lesson 22) |
+| Runtime role `AgentCore-docscopilot-def-ApplicationAgent...` | role | the AgentCore CLI's deploy | call Bedrock models; read and write our memory; use the browser (`DocsCopilotAgentTools`, added by us) |
+| Harness role `AmazonBedrockAgentCoreHarnessDefaultServiceRole-yhy2p` | role | the console | the main branch's agent; unused here |
+| Gateway role `AmazonBedrockAgentCoreGatewayDefaultServiceRole1789098437928` | role | the console when the gateway was created | search the managed Knowledge Base; plus two things we added: invoke the graph search Lambda, and ask the policy engine (lesson 28) |
 | Knowledge Base role `..._x6ipa` | role | the console | read the bucket, run its models, write its index |
 | Graph Knowledge Base role `..._vbrt3` | role | the console | read the bucket, call the embedding and graph models, write the Neptune graph |
 | Lambda role `docs-copilot-graph-search-role-xucr5hec` | role | the Lambda console | write its own logs; plus one line we added: search the graph Knowledge Base |
@@ -965,9 +972,10 @@ permission policy of **that service's** role.
 
 ```mermaid
 flowchart LR
-    Y[your IAM user<br/>the backend on your laptop] -->|InvokeHarness| H[Harness role]
+        Y[your IAM user<br/>the backend on your laptop] -->|S3, Memory reads| S[(bucket, memory)]
+    U[the person's token<br/>backend, then agent] -->|Runtime checks it| H[Runtime role<br/>the agent]
     H -->|InvokeModel| M[the model]
-    H -->|InvokeGateway| G[Gateway role]
+    U -->|Gateway checks it, Cedar judges| G[Gateway role]
     H -->|browser actions| B[Browser]
     G -->|Retrieve| K[managed Knowledge Base]
     G -->|InvokeFunction| L[Lambda role]
@@ -1015,13 +1023,13 @@ graph was started, and by whom.
 S3 is AWS's file storage. A **bucket** is a named container; files inside
 it are **objects**, each stored under a **key** that looks like a path.
 There are no real folders: the slashes in a key are just characters, and
-"list the folder `tenants/dev/`" is really "list keys starting with
-`tenants/dev/`".
+"list the folder `users/<id>/`" is really "list keys starting with
+`users/<id>/`".
 
 ```
 bucket: docs-copilot-901708383582
-  key:  tenants/dev/Secure_Transfers_User_Guide_-_Final-1.pdf                 the file
-  key:  tenants/dev/Secure_Transfers_User_Guide_-_Final-1.pdf.metadata.json   its label
+  key:  users/8821c3e0-.../team-handbook.md                 the file
+  key:  users/8821c3e0-.../team-handbook.md.metadata.json   its label
 ```
 
 Things that matter for us:
@@ -1034,13 +1042,15 @@ Things that matter for us:
 **The label file.** Next to each uploaded file goes a tiny JSON:
 
 ```
-{"metadataAttributes": {"tenant_id": "dev"}}
+{"metadataAttributes": {"8821c3e0-40b1-706d-9cd9-ade667c2feed": "owner"}}
 ```
 
 The Knowledge Base copies these labels onto every chunk of that file. A
-search *could* then be limited to one label, which is how a multi-user app
-would keep users' documents apart. This app has one user and applies no
-filter, but writes the label anyway so the door exists.
+search can then be limited to one label, and that is how this app keeps
+people's documents apart: the label's *key* is the uploader's id (their
+Cognito `sub`, lesson 22), and every search the agent makes carries a
+filter on that key (lesson 17). The key, not the value, because the
+Gateway's policy can compare keys with the caller's id (lesson 28).
 
 **Picture**
 
@@ -1078,7 +1088,7 @@ file list: a prefix search, hiding the label files).
 
 **Try it**
 
-Console: **S3**, bucket `docs-copilot-901708383582`, `tenants/`, `dev/`.
+Console: **S3**, bucket `docs-copilot-901708383582`, `users/`, your id.
 Select the `.metadata.json` file, **Open**: the label. Or from the terminal:
 
 ```
@@ -1086,8 +1096,8 @@ aws s3 ls s3://docs-copilot-901708383582 --recursive --human-readable --profile 
 ```
 
 ```
-2026-09-11 12:14:34   15.2 MiB tenants/dev/Secure_Transfers_User_Guide_-_Final-1.pdf
-2026-09-11 12:14:34   44 Bytes tenants/dev/Secure_Transfers_User_Guide_-_Final-1.pdf.metadata.json
+2026-09-15 00:36:13  420 Bytes users/8821c3e0-40b1-706d-9cd9-ade667c2feed/team-handbook.md
+2026-09-15 00:36:13   62 Bytes users/8821c3e0-40b1-706d-9cd9-ade667c2feed/team-handbook.md.metadata.json
 ```
 
 **Check yourself**
@@ -1811,9 +1821,10 @@ file, `agentcore deploy`, `agentcore invoke` ([Strands on Runtime](https://stran
 Runtime gives the same isolated machine per session, the same identity,
 and the same observability the Harness gets. The difference: with Strands
 you own the loop and can add explicit steps, branches and pauses; with the
-Harness you own a configuration. This project does not need the extra
-control, so it stays on the Harness, and this section is the answer to
-"what would I write if it did".
+Harness you own a configuration. This project needed exactly that
+control: a hook that adds the person's own filter before every search,
+which no configuration can express. So the agent *is* this file, grown to
+about 200 lines: `agent/src/main.py`, lesson 17.
 
 **In our project**
 
@@ -1836,138 +1847,153 @@ Ask "What is SecureTransfers?" and watch: the tool line appears first
 
 ---
 
-## 17. The Harness: the agent AWS runs for us
+## 17. The agent on AgentCore Runtime: our loop, hosted by AWS
 
 **The idea**
 
-**AgentCore** is AWS's set of services for running agents: the loop, the
-tools, the memory, the browser, the tracing, each a managed service. The
-**Harness** is the piece that runs the loop. You declare the model, the
-instructions, the tools, the memory and the limits, and AWS runs the loop
-in its own small isolated machine per session. You write no loop code.
+**AgentCore** is AWS's set of services for running agents: hosting, memory,
+the browser, the gateway, identity, policy, tracing, each a managed
+service. **Runtime** is the hosting piece: you give it a small program,
+and it runs that program in its own isolated machine per session, checks
+who is calling, and streams the program's output back. The program is
+ours: `agent/src/main.py`, about 200 lines, written with **Strands**.
 
-Two ways to get an agent loop:
+Two ways to get an agent loop, and this project has now used both:
 
-| | Managed harness (ours) | A framework (Strands, LangGraph) |
+| | The Harness (main branch, lessons 25) | Our own agent on Runtime (this branch) |
 |---|---|---|
-| you write | configuration | the loop, in code |
-| control | what the config exposes | everything |
-| fits | one agent with tools, which is most assistants | workflows with explicit steps and branches |
+| you write | configuration | the loop, in code, with a framework |
+| identity | the Harness calls tools as its own AWS role | our code calls tools with the *person's* token |
+| control | what the config exposes | everything: a hook can change a tool call before it runs |
+| fits | one agent with tools, one user | per-person rules, or any step the config cannot express |
 
-If this project ever needs an agent with explicit steps (a "research
-agent" is on the maybe-later list), it would be written in **Strands**,
-the framework the Harness itself is built on.
+The switch happened for one reason (lesson 22): with Cognito as the login,
+the Harness cannot carry a person's identity to the Gateway. Our own
+code can, in one line.
 
-**Our Harness**, `docs_copilot_assistant`, version 6:
+**The whole agent, in five parts** (`agent/src/main.py`):
 
-| Setting | Value | Means |
-|---|---|---|
-| model | `mistral.mistral-large-3-675b-instruct` | Mistral Large 3, called through Bedrock's streaming chat API |
-| system prompt | `backend/prompts/assistant.md` | the rules (lesson 19) |
-| tools | the Gateway, the browser | lessons 18 and 21 |
-| allowed tools | `@docs-copilot-gw-kuctwujdbp`, `@aws_browser_v1` | only these; the `@` means "all of this tool's actions". This also removes the built-in shell and file tools a document assistant must not have |
-| memory | our Memory resource, events kept 30 days | lesson 20 |
-| truncation | sliding window, 30 messages | only the last 30 messages of a chat go to the model |
-| maxIterations | 10 | at most 10 turns of the loop per question |
-| maxTokens | 2048 | the longest answer |
-| timeoutSeconds | 300 | give up after 5 minutes |
-| idle timeout | 15 minutes | a quiet session's machine is stopped, so it stops costing |
+```python
+app = BedrockAgentCoreApp()                       # 1. the Runtime contract: /invocations, /ping
 
-Where the loop actually runs: the Harness's settings point at an
-**AgentCore Runtime** named `harness_docs_copilot_assistant`. So the
-Harness is AWS's ready-made agent code, running on the same hosting
-service you would use for agent code you wrote yourself.
-
-**What the Harness streams back.** Every step of the loop, not just the
-answer. Captured on 2026-09-11 for one question with one search:
-
-```
-messageStart assistant
-  contentBlockDelta   reasoningContent "Need to retrieve... use docs___Retrieve"   the model thinking
-  contentBlockStart   toolUse {name: docs___Retrieve}                              a tool call begins
-  contentBlockDelta   toolUse input '{"retrievalQuery": '                           its arguments, in slices
-  contentBlockDelta   toolUse input '{"text": "neptune"}}'
-  contentBlockStop
-messageStop tool_use
-metadata              usage for model call 1
-messageStart user
-  contentBlockStart   toolResult                                                   the tool's answer begins
-  contentBlockDelta   toolResult text: one JSON string, cut into 8 pieces
-  contentBlockStop
-messageStop tool_result
-messageStart assistant
-  contentBlockDelta   text "Neptune Analytics was removed..."   (many of these)    the answer
-  contentBlockStop
-messageStop end_turn
-metadata              usage for model call 2
+@app.entrypoint
+async def chat(payload, context):
+    token = context.request_headers["Authorization"].removeprefix("Bearer ")
+    user_id = user_id_from(token)                  # 2. the sub claim; Runtime already verified the token
+    gateway = MCPClient(url=GATEWAY_URL, headers={"Authorization": f"Bearer {token}"})   # 3. tools, as the person
+    agent = Agent(
+        model=BedrockModel(model_id=MODEL_ID, region_name=REGION, streaming=True),
+        tools=[gateway, AgentCoreBrowser(region=REGION).browser],
+        system_prompt=SYSTEM_PROMPT,
+        session_manager=memory_for(user_id, context.session_id),   # 4. Memory, per person and chat
+        hooks=[OwnDocumentsOnly(user_id)],          # 5. the per-person filter, added before every search
+        callback_handler=None,
+    )
+    async for event in agent.stream_async(payload["message"]):
+        for item in translate(event):
+            yield json.dumps(item)                 # Runtime frames each yield as one SSE line
 ```
 
-Words to know: a **content block** is one piece of a message (text,
-reasoning, a tool call, a tool result). Every block arrives as **start,
-several deltas, stop**. **reasoningContent** is the model thinking out
-loud; we never show it. **metadata** comes once per model call.
+Words to know: an **entrypoint** is the function Runtime calls per request.
+A **session manager** is Strands' plug for "where do messages live"; ours
+writes and reads AgentCore Memory. A **hook** is a function Strands calls
+at a fixed moment of the loop; `OwnDocumentsOnly` runs *before every tool
+call* and, for the document search, sets the filter to the person's own
+label key (lesson 10). The model never sees or chooses that filter.
 
-**How our server translates it.** Text can be forwarded as it arrives. A
-tool call cannot: its JSON comes in slices, and half a JSON object cannot
-be parsed. So `relay()` collects a tool call's slices until the block
-stops, then parses once and sends one `tool` event. Same for a tool
-result: collected, then parsed into `sources` if it is a search result.
+**What the agent streams back.** Strands yields one event per step; the
+agent turns them into five small JSON shapes the backend understands.
+Captured on 2026-09-15 for one question with one search:
 
-| The Harness sends | relay() sends |
+```
+{"type": "tool", "name": "docs___Retrieve", "input": {"retrievalQuery": {"text": "expense approval rule"}}}
+{"type": "tool_result", "text": "{\"retrievalResults\":[...]}"}
+{"type": "text", "text": "Expenses under $50 need no approval..."}
+{"type": "usage", "input_tokens": 16920, "output_tokens": 44, "model_calls": 2}
+```
+
+and, only if something breaks, `{"type": "error", "message": "..."}` as the
+last line. The `tool` event shows the model's own input, without the
+filter: the filter is added on the way to the tool, not in the model's
+message.
+
+**How our server relays it.** `backend/app/chat.py` opens one HTTPS request
+to Runtime with the person's token, reads the SSE lines, and maps each
+JSON shape to the page's events:
+
+| The agent sends | relay() sends |
 |---|---|
-| a complete tool call | `tool` (name and parsed input) |
-| a complete tool result that looks like a search | `sources` (numbered cards) |
-| a text delta | `delta`, straight through |
-| a reasoning delta | nothing |
-| metadata | nothing yet; the token counts are added up |
-| the end | `usage`, then `done` |
-| an error event | `error`, then stop |
+| `tool` | `tool` (name and input) |
+| `tool_result` that looks like a search | `sources` (numbered cards) |
+| `text` | `delta`, straight through |
+| `usage` | `usage`, then `done` |
+| `error` | `error`, then stop |
+
+No AWS SDK is involved in that call: SDKs sign with IAM, and Runtime with
+a login accepts only bearer tokens. So it is a plain streaming HTTP
+client (`httpx2`) and one URL:
+`https://bedrock-agentcore.us-west-2.amazonaws.com/runtimes/<arn>/invocations?qualifier=DEFAULT`.
 
 **Picture**
 
 ```mermaid
 sequenceDiagram
     participant F as backend chat.py
-    participant H as Harness (AWS)
+    participant R as Runtime (AWS)
+    participant A as agent/src/main.py
     participant M as model
-    participant T as a tool
-    F->>H: InvokeHarness(session id, actor "dev", one message)
-    H->>M: call 1: rules + question + tool list
-    M-->>H: "call docs___Retrieve"
-    H->>T: run it
-    T-->>H: result
-    H->>M: call 2: question + result
-    M-->>H: answer, streamed
-    H-->>F: every step, as events
+    participant G as Gateway
+    F->>R: POST /invocations, Bearer token, session id, message
+    R->>R: check the token against Cognito
+    R->>A: chat(payload, context)
+    A->>M: call 1: rules + question + tool list
+    M-->>A: "call docs___Retrieve"
+    A->>A: hook adds the person's filter
+    A->>G: tools/call, Bearer token
+    G-->>A: passages
+    A->>M: call 2: question + passages
+    M-->>A: answer, streamed
+    A-->>F: text, tool, tool_result, usage, as SSE
 ```
 
 **In our project**
 
-`backend/app/chat.py`: `harness_stream` makes the one call,
-`invoke_harness`, with the harness ARN, a session id (a UUID for a new
-chat), the actor id (`dev`) and the one message. `relay` does the table
-above. `backend/.env` holds `HARNESS_ARN`.
+`agent/src/main.py` is the agent. `agent/agentcore/agentcore.json` is the
+Runtime's settings: the code folder, Python 3.14, the Cognito authorizer
+(discovery URL and app client), the `Authorization` header allowed through
+to the code, and two environment variables (the Gateway URL, the memory
+id). `npx @aws/agentcore deploy` packages `agent/src`, builds the
+CloudFormation stack in `agent/agentcore/cdk`, and creates or updates the
+Runtime `docscopilot_docscopilotagent`. Its role got one extra policy,
+`DocsCopilotAgentTools`: the model, our memory, the browser.
 
 **Try it**
 
-AgentCore console, **Harness**, `docs_copilot_assistant`: read every
-setting. Its test page: ask "steps to enable MFA for a user?" and open the
-trace: the decision, the tool call, the passages, the answer. From the
-terminal:
+Run the agent on the laptop exactly as Runtime does, then call it the
+way the backend does:
 
 ```
-aws bedrock-agentcore-control get-harness --harness-id docs_copilot_assistant-bwVinula0L \
-  --region us-west-2 --profile docs-copilot-dev \
-  --query 'harness.{model:model.bedrockModelConfig.modelId,version:harnessVersion,maxIterations:maxIterations,timeoutSeconds:timeoutSeconds,runsOn:environment.agentCoreRuntimeEnvironment.agentRuntimeName,history:truncation}'
+cd agent
+PORT=8081 AWS_PROFILE=docs-copilot-dev uv run python src/main.py
 ```
 
-Drop the `--query` part to see everything, including the full prompt.
+and in another terminal, with a token from lesson 22's "Try it":
+
+```
+curl -N -X POST localhost:8081/invocations -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: $(uuidgen)" \
+  -d '{"message": "What is the expense approval rule?"}'
+```
+
+Every line is one of the five shapes above. Then the same against AWS:
+replace `localhost:8081/invocations` with the Runtime URL from
+`backend/.env` (`AGENT_RUNTIME_ARN`, URL-encoded into the path).
 
 **Check yourself**
 
-1. What would you have to write yourself without the Harness?
-2. What is a content block, and why does `relay()` wait for its stop before sending a `tool` event?
-3. What did the `@` in `@aws_browser_v1` change?
+1. What does Runtime do before it runs our code, and what does it never do?
+2. Why is the filter added in a hook instead of in the prompt?
+3. Why can the backend not use boto3 for this call?
 
 ---
 
@@ -2002,9 +2028,13 @@ Tool name = target name, three underscores, tool name. The agent sees only
 these combined names, and the prompt uses them to route questions.
 
 The Gateway also fixes the parts of a call the agent must not change: the
-number of results, the reranking, any filter. The agent sees only
-`retrievalQuery.text`. Every call to the Gateway is signed with IAM: the
-Harness's role has `InvokeGateway` on this one gateway, nothing else.
+number of results and the reranking are set on the target. Two arguments
+are exposed to the agent: `retrievalQuery.text`, and the metadata
+`filter`, on purpose: our agent fills the filter in code (lesson 17), and
+the Gateway's policy (lesson 28) can only judge an argument it can see.
+Every call to the Gateway carries the signed-in person's Cognito token;
+the Gateway verifies it, then asks its policy engine before it runs
+anything.
 
 **Why a Lambda sits in the middle.** The Gateway's Knowledge Base
 connector accepts only *managed* Knowledge Bases. The graph one is
@@ -2026,7 +2056,7 @@ relay turns graph passages into source cards with no code change. About
 
 ```mermaid
 flowchart LR
-    H[Harness<br/>MCP client] -->|IAM-signed MCP calls| G[Gateway<br/>docs-copilot-gw]
+    H[agent on Runtime<br/>MCP client] -->|MCP calls, Bearer token| G[Gateway<br/>docs-copilot-gw-jwt<br/>token check + Cedar policy]
     G -->|target docs| K[managed Knowledge Base<br/>tool: Retrieve]
     G -->|target graph| L[Lambda docs-copilot-graph-search<br/>tool: search_graph]
     L --> GK[graph Knowledge Base]
@@ -2036,7 +2066,7 @@ flowchart LR
 
 MCP is JSON-RPC: every message is a JSON object with a `method`, `params`
 and an `id`, sent over HTTP to one URL (our Gateway's ends in `/mcp`).
-Three messages make up the whole conversation the Harness has with the
+Three messages make up the whole conversation our agent has with the
 Gateway ([spec](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)).
 
 First, a handshake. The client says which protocol version it speaks and
@@ -2047,7 +2077,7 @@ version is refused. After this, every HTTP request carries the header
 
 ```json
 {"jsonrpc": "2.0", "id": 1, "method": "initialize",
- "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "harness", "version": "1"}}}
+ "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "strands", "version": "1"}}}
 ```
 
 Second, the menu. The answer is the tool list: for each tool, its name,
@@ -2078,8 +2108,8 @@ malformed request gets a JSON-RPC error instead.
 
 That is the entire protocol as this project uses it. Every AI product
 that "supports MCP" speaks these three messages. What the Gateway adds on
-top: it signs nothing itself but checks the caller's IAM signature on the
-way in, translates `tools/call` into a Knowledge Base `Retrieve` or a
+top: it checks the caller's token on the way in (a Cognito token here,
+an IAM signature on the main branch's gateway), translates `tools/call` into a Knowledge Base `Retrieve` or a
 Lambda invoke on the way out, and merges every target into one menu. Two
 things it makes possible that a plain MCP server does not: a **Policy**
 engine that judges every call before it runs (lesson 28), and per-caller
@@ -2106,8 +2136,8 @@ its `description`: that sentence is what the model reads to decide.
 
 **Try it**
 
-AgentCore console, **Gateways**, `docs-copilot-gw`, **Targets**: `docs`
-and `graph`. Open `graph`: its schema is the file above. Lambda console,
+AgentCore console, **Gateways**, `docs-copilot-gw-jwt`, **Targets**:
+`docs` and `graph` (`docs-copilot-gw`, the IAM one, is the main branch's). Open `graph`: its schema is the file above. Lambda console,
 **Functions**, `docs-copilot-graph-search`: its code, its setting, its
 role. Call it yourself exactly as the Gateway does (graph running):
 
@@ -2141,9 +2171,10 @@ prints `ok`: the self-check with a fake Knowledge Base.
 The **system prompt** is standing instructions the model gets with every
 question, before the user's words. It decides behavior as much as code
 does: which tool to try first, how to cite, what to do when it does not
-know. It is configuration, kept in git and pasted into the Harness.
+know. It is text, `SYSTEM_PROMPT` in `agent/src/main.py`, deployed with
+the agent. It changes when the code changes, and nowhere else.
 
-Our seven rules, from `backend/prompts/assistant.md`:
+Our seven rules:
 
 | Rule | In short |
 |---|---|
@@ -2179,17 +2210,16 @@ skill, and the only test is real questions.
 
 **In our project**
 
-`backend/prompts/assistant.md`. Verified on 2026-09-13: the Harness's
-stored prompt equals the file, word for word. To try a new prompt without
-touching the console, the invoke call accepts a `systemPrompt` override;
-the file stays the source of truth.
+`SYSTEM_PROMPT` in `agent/src/main.py`. One thing the prompt does *not*
+say: anything about the per-person filter. The rules the model must not
+be able to talk its way around are not written as rules; they are code
+(lesson 17's hook) and policy (lesson 28).
 
 **Try it**
 
-AgentCore console, Harness, `docs_copilot_assistant`, **System prompt**:
-the same text. In the Harness's test page, swap rules 1 and 2 (an override
-for one question, nothing saved) and ask a URL question: which tool does
-it pick now?
+Swap rules 1 and 2 in `agent/src/main.py`, run the agent on the laptop
+(lesson 17's Try it), and ask a URL question: which tool does it pick
+now? Put the rules back. Nothing reaches AWS until `agentcore deploy`.
 
 **Check yourself**
 
@@ -2206,21 +2236,23 @@ it pick now?
 The model forgets everything between calls. "Memory" is always something
 outside the model:
 
-- **Short-term memory** is the conversation so far, replayed into each call. Our page sends only your new message; the Harness loads the earlier messages of that chat from memory. So a long chat still costs more per turn than a short one, which is why the Harness keeps only the last 30 messages.
+- **Short-term memory** is the conversation so far, replayed into each call. Our page sends only your new message; the agent's session manager loads the earlier messages of that chat from memory. So a long chat still costs more per turn than a short one, which is why Strands keeps only the latest messages (a sliding window).
 - **Long-term memory** is what gets *extracted* from conversations and kept across them. A few minutes after a chat ends, three background jobs (**strategies**) read it and write records: **preferences** (how you like answers), **facts** (about you and your work), and a **summary** of the chat. The next new chat starts with the relevant records in its prompt.
 
 **AgentCore Memory** does both. Everything is stored per **actor** (whose
-memory: our fixed `dev`) and per **session** (one chat).
+memory: the signed-in person's Cognito `sub`) and per **session** (one
+chat).
 
 ```
 memory docs_copilot_assistant-6aIbceHbw1
-  actor dev
-    session 4fe31fe5-...   events: question, tool call, tool result, answer, agent state...
-    session e3f3c654-...   events: ...
+    actor 8821c3e0-...  (one person)
+    session 8e9aeb31-...   events: question, tool call, tool result, answer, agent state...
+    session c16bc23a-...   events: ...
+  actor b89123d0-...  (another person; nothing above is visible here)
   long-term records
-    /actors/dev/preferences/         "Prefers concise, bullet-point responses..."
-    /actors/dev/facts/               "The user asked about steps to enable MFA..."
-    /actors/dev/summaries/<session>/ one summary per chat
+    /actors/<sub>/preferences/         "Prefers concise, bullet-point responses..."
+    /actors/<sub>/facts/               "The user asked about steps to enable MFA..."
+    /actors/<sub>/summaries/<session>/ one summary per chat
 ```
 
 One turn with one search is about ten **events**: one per message
@@ -2228,7 +2260,7 @@ One turn with one search is about ten **events**: one per message
 JSON text, plus "blob" events with the agent's internal state. Events
 expire after 30 days.
 
-**What it learned from your test chat**, read on 2026-09-13:
+**What it learned from your test chat** (the main branch's `dev` actor, read on 2026-09-13):
 
 ```
 preference: "Prefers concise, bullet-point formatted responses (ideally two bullets);
@@ -2250,7 +2282,7 @@ sidebar hides chats that have no events.
 
 ```mermaid
 flowchart LR
-    Q[your new message] --> H[Harness]
+    Q[your new message] --> H[agent]
     STM[(short-term<br/>this chat's messages)] -->|replayed| H
     LTM[(long-term<br/>preferences, facts, summaries)] -->|searched, relevant ones added| H
     H -->|after the answer| STM
@@ -2263,11 +2295,11 @@ Nothing about long-term memory is magic. It is a second model, run in the
 background over the conversation, with a prompt that says "list the user's
 preferences" ([strategies](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-strategies.html)):
 
-1. **Events land.** Each message of a chat is written as an event under (actor, session). The Harness does this after every turn.
+1. **Events land.** Each message of a chat is written as an event under (actor, session). The agent's session manager does this after every message.
 2. **A strategy runs.** Once new events exist, each configured strategy sends them to an extraction model with its own prompt: the semantic strategy asks for facts, the user-preference strategy for preferences, the summarization strategy for a running summary. This is why records appear minutes after a chat, not during it.
 3. **Consolidation.** New records are compared with existing ones in the same namespace and merged or replaced, so "prefers two bullets" is not stored five times. The record you saw in the Try it above was consolidated from several of your test messages into one.
-4. **Storage by namespace.** Each strategy writes to its own path, `/actors/dev/preferences/` and so on. Records are embedded, so they can be searched by meaning.
-5. **Retrieval at the next chat.** At the start of a session the Harness searches the records with the new message as the query and adds the closest ones to the prompt. It is a small RAG system over your own past, which is also the honest answer to "what is the difference between memory and RAG": the same machinery, pointed at conversations instead of documents ([AWS's own comparison](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-ltm-rag.html)).
+4. **Storage by namespace.** Each strategy writes to its own path, `/actors/<sub>/preferences/` and so on. Records are embedded, so they can be searched by meaning.
+5. **Retrieval at the next chat.** Before each turn the session manager searches the records with the new message as the query and adds the closest ones to the prompt (in the agent: `memory_for`, three namespaces, top 5 facts and preferences, the session's summary). It is a small RAG system over your own past, which is also the honest answer to "what is the difference between memory and RAG": the same machinery, pointed at conversations instead of documents ([AWS's own comparison](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-ltm-rag.html)).
 
 Three levels of control exist: built-in strategies (what we use: AWS's
 prompts and model, no configuration), built-in with overrides (your own
@@ -2279,11 +2311,14 @@ override the prompt to be stricter about what counts as a preference.
 
 **In our project**
 
-The Harness writes memory itself. Our backend only reads it for the
-sidebar: `backend/app/sessions.py` lists this actor's sessions, labels
-each with its first question, and loads one chat's messages (keeping only
-question and answer text, dropping tool calls and blobs). `backend/.env`
-holds `MEMORY_ID`.
+The agent writes memory through Strands' `AgentCoreMemorySessionManager`
+(`memory_for` in `agent/src/main.py`), with the person's `sub` as actor.
+Our backend only reads it for the sidebar: `backend/app/sessions.py` lists
+the signed-in person's sessions, labels each with its first question, and
+loads one chat's messages (keeping only question and answer text, dropping
+tool calls and blobs). It uses the same `sub` from the token, so one
+person can never list another's chats, even by guessing a session id.
+`backend/.env` and the Runtime both hold `MEMORY_ID`.
 
 **Try it**
 
@@ -2292,7 +2327,7 @@ strategies. Then what it learned:
 
 ```
 aws bedrock-agentcore list-memory-records --memory-id docs_copilot_assistant-6aIbceHbw1 \
-  --namespace /actors/dev/preferences/ --region us-west-2 --profile docs-copilot-dev \
+  --namespace /actors/<your sub, lesson 22>/preferences/ --region us-west-2 --profile docs-copilot-dev \
   --query 'memoryRecordSummaries[].content.text'
 ```
 
@@ -2305,7 +2340,7 @@ later, ask anything, and watch it obey.
 1. Why does the page not need to send the whole chat?
 2. What is the difference between a preference and a fact here?
 3. Why can a wrong "fact" in long-term memory change later answers?
-4. Every user of this app shares one memory. Why?
+4. Two people share one memory resource and never see each other's records. What keeps them apart?
 
 ---
 
@@ -2342,9 +2377,12 @@ without a URL is unreliable. It has a browser, not a search engine.
 
 **In our project**
 
-The AWS-managed default browser `aws.browser.v1`; nothing was created.
-Allowed on the Harness as `@aws_browser_v1`. It does not go through the
-Gateway: the Harness drives it directly, as its own role. The page shows
+The AWS-managed default browser `aws.browser.v1`; nothing was created. In
+the agent it is one tool, `AgentCoreBrowser(region).browser` from the
+`strands-agents-tools` package: it opens a browser session on AWS and
+drives it over the session's automation stream with Playwright. It does
+not go through the Gateway: the agent drives it directly, as the Runtime
+role (the `Browser` statement in `DocsCopilotAgentTools`). The page shows
 only "Opened <url>" and hides the other steps (`describeTool` in
 `Chat.tsx`).
 
@@ -2367,69 +2405,97 @@ much bigger.
 
 **The idea**
 
-Lesson 9 in practice. Every hop of a question is made by some identity,
-and each identity has exactly the permissions for its hop.
+Lesson 9 in practice, with one twist: two kinds of identity travel through
+the system. **IAM identities** are your account's people and services.
+The **person's identity** is a Cognito token, and it is the same token at
+three hops in a row.
 
-| Hop | Caller | Acts as | Permission that makes it work |
+| Hop | Caller | Acts as | What makes it work |
 |---|---|---|---|
-| backend calls the agent | FastAPI on your laptop | your user `yashubitra` | `AdministratorAccess` (the dev shortcut) |
-| agent calls the model | Harness | Harness role | invoke the model |
-| agent calls a tool | Harness | Harness role | `InvokeGateway` on our gateway |
+| page calls the backend | the browser | the person, `Authorization: Bearer <token>` | FastAPI verifies the token (`backend/app/auth.py`) |
+| backend calls the agent | FastAPI on your laptop | the same token | Runtime's JWT authorizer: Cognito's discovery URL and our app client id |
+| agent calls the model | agent on Runtime | the Runtime role | invoke the model |
+| agent calls a tool | agent on Runtime | the same token again | the Gateway's JWT authorizer, then its Cedar policy (lesson 28) |
 | document search | Gateway | Gateway role | Retrieve on the managed Knowledge Base |
-| graph search, step 1 | Gateway | Gateway role | `lambda:InvokeFunction` on our function (we added it) |
-| graph search, step 2 | Lambda | Lambda role | `bedrock:Retrieve` on the graph Knowledge Base (we added it) |
-| web page | Harness | Harness role | start sessions of the default browser |
+| graph search, step 1 | Gateway | Gateway role | `lambda:InvokeFunction` on our function |
+| graph search, step 2 | Lambda | Lambda role | `bedrock:Retrieve` on the graph Knowledge Base |
+| web page | agent on Runtime | the Runtime role | start sessions of the default browser |
+| memory read and write | agent on Runtime | the Runtime role | events and records on our memory |
+| sidebar, upload, file list | FastAPI on your laptop | your user `yashubitra` | `AdministratorAccess` (the dev shortcut), actor and folder from the token's `sub` |
 | sync reads the bucket | each Knowledge Base | its own role | made by the console |
 
-Two AgentCore facts that live here: calling a Harness needs two
-permissions at once, `InvokeHarness` on the harness and
-`InvokeAgentRuntime` on the runtime underneath it. Reading the sidebar
-needs `ListSessions` and `ListEvents` on the memory.
+**The login, from the top.** Cognito is a login service: a **user pool**
+holds the accounts, a hosted **managed login** page does the sign-in, and
+an **app client** is the registration of our page with the pool. Ours is a
+public client: no secret, because a page in a browser cannot keep one.
 
-**Under the hood: AgentCore Identity, and why not yet**
+The sign-in is **OAuth 2.0 authorization code with PKCE**
+(`frontend/lib/auth.ts`):
 
-Everything above is IAM: identities for *your account's* people and
-services. **AgentCore Identity** is the piece for the two identities IAM
-does not cover: the *end user* talking to the agent, and the *agent
-itself* when it reaches into other companies' apps ([Identity docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/identity.html)).
-It has three parts:
+1. The page invents a random secret (the *verifier*), keeps it in the tab, and sends Cognito only its hash (the *challenge*).
+2. Cognito shows the login page. The person signs in. Cognito sends the browser back to `/callback` with a one-time *code*.
+3. The page posts the code plus the verifier to Cognito's token endpoint. Cognito hashes the verifier, compares it with step 1, and only then hands out tokens.
+4. The page keeps the **access token** for an hour and sends it as `Authorization: Bearer` on every request.
 
-| Part | What it is | Our project today |
+A stolen code is useless without the verifier, and the verifier never left
+the tab. The app never sees a password.
+
+**What a token is.** A **JWT** is three base64 pieces: a header, the
+**claims** (`sub` the person's permanent id, `iss` the pool, `client_id`
+our app, `token_use` access, `exp` the expiry), and a signature made with
+the pool's private key. Anyone can read the claims; only the pool's public
+keys (published at its JWKS URL) can verify the signature. Every hop
+verifies the same way:
+
+| Verifier | Checks | Where configured |
 |---|---|---|
-| **workload identity** | an identity record for each agent and gateway, created automatically. It is how an agent proves *which agent* it is to the token vault | already exists: our Gateway carries one (`workload-identity/docs-copilot-gw-kuctwujdbp`), and the Harness role may fetch a workload access token. Plumbing that sits unused |
-| **inbound authorizer** | a JWT check on the Harness or Gateway. Callers send a bearer token from a login provider (Cognito, Okta, Entra, any OpenID provider) instead of signing with IAM; the Harness checks it against the provider's discovery URL and allowed client ids | not used. Inbound is IAM: the backend signs as your user. There is no login, so there is no token |
-| **outbound credential providers** and the **token vault** | stored OAuth clients and API keys. The agent asks the vault for a token to call GitHub, Google, Slack, or an OpenAI key, and the code never sees the secret. OAuth comes in two shapes: 2-legged (the agent acts as itself) and 3-legged (the agent acts *on behalf of a user*, after that user consents once in a consent portal) | not used. Every tool we have is inside our account, reached with IAM roles |
+| FastAPI | signature, expiry, issuer, `token_use == access`, `client_id` | `backend/app/auth.py`, keys fetched once and cached |
+| Runtime | signature, expiry, issuer, allowed client ids | `agent/agentcore/agentcore.json`, `authorizerConfiguration` |
+| Gateway | the same | the gateway's `customJWTAuthorizer`, allowed client = our app client |
 
-**Why the two halves are linked.** Per-user outbound credentials only
-work when the *inbound* call carried a user. With IAM inbound, the
-Harness does not know which human asked, so it cannot fetch a
-user-scoped token for a downstream app; the docs say this plainly, SigV4
-callers get no per-user identity propagation ([Harness security](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)).
-That is the honest reason Identity is not in this project: with one
-user and no third-party apps, both halves have nothing to do. The
-`dev` header stub stands exactly where a verified user id would go.
+The `sub` claim is the person's id everywhere: the Memory actor, the S3
+folder `users/<sub>/`, the document label key, and the Cedar principal.
 
-**What it would take to add.** One day, no architecture change:
+**AgentCore Identity, the parts we use and the part we could not.**
+Identity is the AgentCore service for exactly this: the *end user* talking
+to the agent, and the *agent itself* reaching other apps ([Identity
+docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/identity.html)).
 
-1. A Cognito user pool with a hosted login page; the Next.js page signs in and holds the id token.
-2. `authorizerConfiguration: {customJWTAuthorizer: {discoveryUrl, allowedClients}}` on the Harness. Calls then carry `Authorization: Bearer <token>` instead of an IAM signature.
-3. The backend takes the user id from the token's claims and uses it as the Memory actor id and the tenant label. Every user gets their own conversations and long-term memory, and the label written in lesson 10 finally gets a filter.
-4. Optionally, a Cedar policy on the Gateway that reads the user's claims (lesson 28), which is the layered pattern AWS shows with Cognito plus AgentCore plus Cedar ([walkthrough](https://builder.aws.com/content/3EaHytE8A8uqqkW6ektZcFLGz06/enforce-layered-end-to-end-access-control-for-ai-agents-with-amazon-bedrock-agentcore-amazon-cognito-and-cedar)).
+| Part | What it is | Ours |
+|---|---|---|
+| **inbound authorizer** | a JWT check on Runtime or a Gateway, against any OpenID provider's discovery URL | on both. The person's token, verified twice more after FastAPI |
+| **workload identity** | an identity record per agent and gateway, created automatically | exists for the Runtime and the Gateway; unused by us directly |
+| **outbound credential providers**, the **token vault** | stored OAuth clients and API keys, so an agent can call GitHub or Google as a person after a one-time consent | tried and dropped (lesson 25): the Harness never sends the return URL the vault needs, so the consent step cannot start |
 
-The second half, a 3-legged OAuth provider so the agent can open a GitHub
-issue as you, is the "action tool" idea from the early plan. It needs
-the first half in place.
+**Why the Harness had to go.** SigV4 callers get no per-user identity
+propagation, and a Harness calls its Gateway with SigV4 or through the
+token vault, nothing else ([Harness security](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)).
+The token vault path failed as above. Our own code has no such limit: it
+holds the token Runtime verified and forwards it. That is the whole reason
+lesson 17 is about Runtime now.
 
 **Try it**
 
-Break it: in IAM, detach `InvokeGraphSearchLambda` from the Gateway role,
-ask a relationship question (graph running), and watch where the chain
-breaks and what error appears. Then put it back.
+Get a token for a test user without the page (the app client allows the
+password flow for testing), read its claims, and call the backend:
+
+```
+TOKEN=$(aws cognito-idp initiate-auth --client-id pnij50p1g7e237mffctm84v9v --auth-flow USER_AUTH \
+  --auth-parameters USERNAME=you@example.com,PREFERRED_CHALLENGE=PASSWORD,PASSWORD='...' \
+  --region us-west-2 --profile docs-copilot-dev --query AuthenticationResult.AccessToken --output text)
+echo $TOKEN | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | python3 -m json.tool
+curl -H "Authorization: Bearer $TOKEN" localhost:8001/v1/sessions
+curl localhost:8001/v1/sessions          # no token: 401, before any AWS call
+```
+
+Break it: sign in as a second person and ask the first person's question.
+The search returns nothing, and lesson 28 shows the Gateway refusing the
+other key outright.
 
 **Check yourself**
 
-1. Which identity makes the call to the Lambda?
-2. The backend gets "access denied" calling the Harness. Whose policy is wrong?
+1. Which three parties verify the same token, and what does each check?
+2. Why does the page never hold a client secret?
 3. Name the identity at each of these hops: backend to agent, agent to Gateway, Gateway to Knowledge Base.
 
 ---
@@ -2446,18 +2512,22 @@ sequenceDiagram
     participant B as Browser<br/>Chat.tsx
     participant P as Proxy<br/>route.ts
     participant F as FastAPI<br/>chat.py
-    participant H as Harness
+        participant H as agent on Runtime
     participant M as Model
     participant G as Gateway
     participant K as Knowledge Base
     participant Me as Memory
     B->>P: POST /api/chat {message}
-    P->>F: POST /v1/chat + X-Tenant-Id: dev
-    F->>H: InvokeHarness(session, actor=dev, message)
+        P->>F: POST /v1/chat + Authorization: Bearer token
+    F->>F: verify the token, sub = the person
+    F->>H: POST /invocations, same token, session, message
+    H->>H: Runtime verifies the token again
     H->>Me: load this chat + relevant long-term records
     H->>M: call 1: rules + question + tool list
     M-->>H: "call docs___Retrieve"
-    H->>G: MCP tools/call docs___Retrieve
+        H->>H: hook adds filter key = sub
+    H->>G: MCP tools/call docs___Retrieve, same token
+    G->>G: token check, Cedar: filter key == caller
     G->>K: Retrieve (hybrid search + rerank)
     K-->>G: 5 passages
     G-->>H: tool result
@@ -2472,20 +2542,20 @@ sequenceDiagram
 | Hop | What happens | Where | Lesson |
 |---|---|---|---|
 | 1 | the browser sends only the new message and `session_id: null` | `Chat.tsx`, `send()` | 7 |
-| 2 | the proxy checks the allowlist, adds `X-Tenant-Id: dev`, forwards to port 8001 | `route.ts`, `forward()` | 7 |
-| 3 | FastAPI checks the header (400 if bad), the body (422 if bad), makes a UUID session id. Nothing has cost money yet | `tenancy.py`, `chat.py` | 5 |
-| 4 | the backend opens the agent's stream, signed as your IAM user. A refusal becomes 503 or 502 here | `chat.py`, `harness_stream` | 6, 9 |
-| 5 | the Harness starts a session machine, loads short-term memory (empty: new chat) and searches long-term memory for `dev` | AWS | 17, 20 |
+| 2 | the proxy checks the allowlist, forwards the `Authorization` header and the body to port 8001 | `route.ts`, `forward()` | 7 |
+| 3 | FastAPI verifies the token (401 if bad), the body (422 if bad), makes a UUID session id. Nothing has cost money yet | `auth.py`, `chat.py` | 5, 22 |
+| 4 | the backend opens the agent's stream with the person's token. A refusal becomes 401, 503 or 502 here | `chat.py`, `agent_events` | 6, 17 |
+| 5 | Runtime verifies the token, starts a session machine, runs `chat()`: the session manager loads short-term memory (empty: new chat) and searches long-term memory for this `sub` | AWS, `agent/src/main.py` | 17, 20 |
 | 6 | model call 1: rules + question + tool list. The model reasons, then writes a tool call: `docs___Retrieve {"retrievalQuery": {"text": "enable MFA user"}}`. Rule 2 sent it there | AWS | 16, 19 |
-| 7 | the Harness calls the Gateway over MCP, signed as the Harness role. `docs___Retrieve` = target `docs`, tool `Retrieve` | AWS | 18 |
-| 8 | the Knowledge Base embeds the question, runs hybrid search, reranks, returns 5 chunks with their source file and labels | AWS | 13, 14 |
+| 7 | the hook adds `filter: {equals: {key: <sub>, value: "owner"}}`; the agent calls the Gateway over MCP with the same token. The Gateway verifies it and its Cedar rule checks the key against the caller. `docs___Retrieve` = target `docs`, tool `Retrieve` | `main.py`, AWS | 17, 18, 28 |
+| 8 | the Knowledge Base embeds the question, runs hybrid search over this person's chunks only, reranks, returns 5 with their source file and labels | AWS | 13, 14 |
 | 9 | model call 2: question + passages. The model writes the answer, citing by position: `[1]`, `[2]` | AWS | 16 |
-| 10 | `relay()` translates the stream: `session` first, `tool` when the call's block stops, `sources` when the result's block stops, `delta` per text piece, `usage` summed, `done` | `chat.py`, `relay` | 6, 17 |
+| 10 | the agent yields `tool`, `tool_result`, `text`, `usage`; `relay()` maps them: `session` first, then `tool`, `sources`, `delta` per piece, `usage`, `done` | `main.py`, `chat.py` | 6, 17 |
 | 11 | the page decodes bytes, parses events, and draws: the tool line, the source cards, the words as they come, `[1]` as a link | `Chat.tsx`, `lib/sse.ts`, `lib/citations.ts`, `lib/markdown.ts` | 7 |
-| 12 | the Harness saves about ten events to Memory. Minutes later, the strategies extract records. The sidebar reloads and labels the chat with its first question | AWS, `sessions.py` | 20 |
+| 12 | the session manager has saved each message as an event under this `sub`. Minutes later, the strategies extract records. The sidebar reloads (same `sub`) and labels the chat with its first question | AWS, `sessions.py` | 20 |
 
 **The two other paths.** A **URL question**: hop 6 picks the browser. No
-Gateway; the Harness drives Chrome directly: open, navigate, read, close.
+Gateway; the agent drives Chrome directly: open, navigate, read, close.
 The page text goes into call 2. A **relationship question**: hop 6 picks
 `graph___search_graph`. The Gateway invokes our Lambda, which searches the
 graph Knowledge Base. Only while the graph is started.
@@ -2500,7 +2570,7 @@ COMPLETE.
 
 1. At which hop could a bad request be rejected without spending anything?
 2. Name the identity making the call at hop 4, at hop 7, and at hop 8.
-3. What does `relay()` wait for before sending a `tool` event, and why?
+3. Where is the per-person filter added, and who checks it after that?
 4. You upload a file and ask a relationship question about it at once. Why might the graph not know it yet?
 
 ---
@@ -2512,7 +2582,7 @@ COMPLETE.
 | Neptune graph | **every hour it exists**, running or stopped | $0.48 an hour running, $0.05 stopped, $0 deleted |
 | the model (Mistral Large 3) | per question | about 1 cent for a document question, 2 to 8 cents for a web page |
 | syncs | per upload | fractions of a cent per small file; a few cents for the guide's graph extraction |
-| Harness, Gateway, Lambda, Memory, Browser | only while used | cents |
+| Runtime (the agent's machine), Gateway, Lambda, Memory, Browser, Cognito | only while used | cents; Runtime bills per second of CPU and memory while a session is busy, nothing while idle; Cognito is free for the first 10,000 monthly users |
 | S3, IAM, the Knowledge Bases' storage | always | close to zero at our size |
 
 Measured: a document question was 14,472 tokens in, 147 out, 2 model
@@ -2557,8 +2627,11 @@ a lesson.
 | plan | LangGraph supervisor + specialist agents + FastMCP tool servers | one Harness + the Gateway | the supervisor was over-engineering at this scale; the Gateway is already an MCP server |
 | plan | Postgres in Docker for chat history | AgentCore Memory | sessions and messages come free with the Harness; no database to run |
 | plan | Cognito login, per-tenant search filter | no login, single user, `dev` stub | finish the product end to end first; the tenant plumbing stays as a stub |
+| D5 | no login, `dev` stub | Cognito login, everything per person | the product worked; the missing piece was "whose documents" |
+| D5 | the Harness, IAM to the Gateway | our own Strands agent on Runtime, the person's token at every hop | the Harness cannot carry a person to the Gateway with Cognito: its token-vault path fails before consent, tested four ways (2026-09-14). One line of our own code does it |
+| D5 | Cedar rule on the filter *value* | Cedar rule on the filter *key* (the label key is the person's id) | the Gateway's schema types filter values as unknown, and Cedar refuses to compare unknown with a string |
 | plan | SQS queue + worker for indexing | the Knowledge Base's own sync | the sync already runs in the background |
-| plan | Code Interpreter trial, research agent on Runtime | dropped, and "later, maybe" | not worth it yet |
+| plan | Code Interpreter trial | dropped | not worth it yet |
 | after the fresh start | conversations shown by time, raw `**markdown**`, browser steps as "Used browser" | first-question titles, a small markdown reader, "Opened <url>" | found only by driving the app in a real browser; command-line tests could not see them |
 
 **Things that bit, and the fix**
@@ -2574,7 +2647,12 @@ a lesson.
 | three permission walls creating the Knowledge Base | least privilege on a sandbox account | `AdministratorAccess` on the dev user, recorded honestly |
 | the first frontend CI run failed on a missing type | Next.js generates some types locally; CI starts clean | `next typegen` before `tsc` |
 | a wiped conversation still listed, empty | AgentCore can delete events but not the conversation | the sidebar hides chats with no events |
-| a tenant id starting with `_` would break Memory calls | actor ids must start with a letter or digit | the tenant check tightened |
+| a tenant id starting with `_` would break Memory calls | actor ids must start with a letter or digit | the tenant check tightened; gone since login, the id comes from a verified token |
+| "You must provide a ResourceOauth2ReturnUrl" from the Harness | the Harness never sends the return URL the token vault needs for user consent | gave up on the Harness for this; our own agent forwards the token instead |
+| "Authorizer type cannot be updated for an existing gateway" | a gateway's login type is fixed at creation | a second gateway, `docs-copilot-gw-jwt`; the old one stays for main |
+| "the client session is currently running" from Strands | the Gateway client was started twice: a `with` block and the agent both start it | pass the client to the agent, no `with` |
+| `insufficient_scope` from the Gateway | its allowed client was the wrong app client | allowed client = the page's app client, the token the agent forwards |
+| the CDK build said `tsc: command not found`, then `moduleResolution=node10 removed` | the deploy runs `tsc`; the global TypeScript was too new | `npm install` inside `agent/agentcore/cdk` so its pinned TypeScript is used |
 
 **Check yourself**
 
@@ -2598,26 +2676,31 @@ cd ~/Projects/personal/Docs_Copilot/frontend
 npm run dev
 ```
 
-Open http://localhost:3000. `frontend/.env.local` must say
-`API_URL=http://localhost:8001` (copy `.env.example` the first time and
-change the port). `backend/.env` must hold the IDs (copy `.env.example`).
+Open http://localhost:3000 and sign in. `frontend/.env.local` must say
+`API_URL=http://localhost:8001` plus the Cognito domain and app client id
+(copy `.env.example` the first time). `backend/.env` must hold the IDs
+(copy `.env.example`). The agent itself runs on AWS Runtime; lesson 17
+shows how to run it on the laptop instead.
 
 **Check it.**
 
 ```
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest -q
 cd frontend && npm run lint && npm run typecheck && npm test
+cd agent && uv run ruff check . && uv run pytest -q
 ```
 
-**What the 51 tests cover.** AWS is never called: the tests swap the AWS
-clients for fakes (`FakeAgentCore`, `FakeKb` in `backend/tests/`) and use
-`moto`, a library that fakes S3 in memory. The event shapes in the fakes
+**What the 73 tests cover.** AWS is never called: the tests swap the AWS
+clients for fakes (`FakeRuntime`, `FakeAgentCore`, `FakeKb` in
+`backend/tests/`) and use `moto`, a library that fakes S3 in memory. The event shapes in the fakes
 are copied from real captures, so they match what AWS sends.
 
-- `test_chat.py` (15): the exact event order on the happy path; the exact call made to the Harness; a fresh session id; bad tenant header is 400 and the agent is never called; invalid body is 422 and the agent is never called; throttling is 503 with `Retry-After`; other errors are 502 without leaking AWS's text; an error event mid-stream and a broken connection both become `error`.
-- `test_documents.py` (14): upload writes the label then the file and starts both syncs; a busy sync keeps the file; a refused graph sync does not fail the upload; file names can never leave the tenant folder; wrong type is 415 and writes nothing; too large is 413; the list hides label files; sync status; a malformed job id is 422.
+- `test_chat.py` (16): the exact event order on the happy path; the exact request to Runtime (URL, your token, the session header, the body); a fresh session id; no valid token is 401 and Runtime is never called; invalid body is 422 and Runtime is never called; Runtime's 401 stays 401; busy is 503 with `Retry-After`; other errors are 502 without leaking AWS's text; an error event mid-stream and a broken stream both become `error`.
+- `test_auth.py` (13): a good token gives the `sub`; expired, other pool, id token instead of access token, another app client, wrong signature and garbage are all 401 without saying why; a missing or wrong-scheme header is 401.
+- `test_documents.py` (14): upload writes the label (key = the user id) then the file and starts both syncs; a busy sync keeps the file; a refused graph sync does not fail the upload; file names can never leave the user's folder; wrong type is 415 and writes nothing; too large is 413; not signed in is 401 and writes nothing; the list hides label files and other users' files; sync status; a malformed job id is 422.
 - `test_sessions.py` (9): newest first; empty chats hidden; the title is the first question, shortened; only question and answer text, in order; every page of events read; malformed memory text skipped; a Memory error is 502.
-- frontend (13): the SSE parser (events split across chunks, CRLF, keep-alive comments), the citation splitter (both marker styles, non-numbers ignored), the markdown reader (a real answer, wrapped lines, headings, a lone asterisk).
+- `agent/tests` (5): the hook adds the person's filter, replaces a filter the model wrote, and leaves other tools alone; the `sub` is read from the token; Strands events become the five shapes.
+- frontend (14): the SSE parser (events split across chunks, CRLF, keep-alive comments), the citation splitter (both marker styles, non-numbers ignored), the markdown reader (a real answer, wrapped lines, headings, a lone asterisk), the PKCE hash against Cognito's own example.
 
 "Never called" and "writes nothing" are checked on every rejection: a bug
 there would cost money or leave junk on every bad request.
@@ -2626,7 +2709,7 @@ there would cost money or leave junk on every bad request.
 
 ```
 aws bedrock-agentcore list-memory-records --memory-id docs_copilot_assistant-6aIbceHbw1 \
-  --namespace /actors/dev/preferences/ --region us-west-2 --profile docs-copilot-dev \
+  --namespace /actors/<your sub>/preferences/ --region us-west-2 --profile docs-copilot-dev \
   --query 'memoryRecordSummaries[].memoryRecordId' --output text
 aws bedrock-agentcore batch-delete-memory-records --memory-id docs_copilot_assistant-6aIbceHbw1 \
   --region us-west-2 --profile docs-copilot-dev --records memoryRecordId=<id> memoryRecordId=<id>
@@ -2638,11 +2721,11 @@ back**.
 
 | Break this | Predict, then check | Lesson |
 |---|---|---|
-| in `route.ts`, remove the `X-Tenant-Id` header | every request fails. Which status, and which file sends it? | 5, 7 |
+| in `frontend/lib/api.ts`, stop setting the `Authorization` header | every request is 401 and the page sends you to sign in. Which file answers 401? | 5, 22 |
 | upload a `.exe` file | rejected before S3 is touched. Which status? | 10 |
-| in the Harness console, change `@aws_browser_v1` back to `aws_browser_v1`, ask a URL question | the agent never opens the page. Why? | 17 |
+| in `agent/src/main.py`, make `add_filter` return at once, run the agent on the laptop, ask a documents question | the Gateway refuses the search: "denied by default". Why does the model's own call not pass? | 17, 28 |
 | with the graph stopped, ask "how do folders relate to user roles?" | what does the tool return, and what does the agent say? | 15 |
-| swap rules 1 and 2 in the prompt (a test-page override is enough) | which tool does a URL question pick now? | 19 |
+| swap rules 1 and 2 in `SYSTEM_PROMPT`, run the agent on the laptop | which tool does a URL question pick now? | 19 |
 | in IAM, detach `InvokeGraphSearchLambda` from the Gateway role, ask a relationship question | where does the chain break, and what error shows? | 9, 22 |
 | in `backend/.env`, add a line `FOO=bar` and start the server | it refuses to start. What does the error say? | 5 |
 
@@ -2691,7 +2774,7 @@ open, the same data could go to any tool, not only CloudWatch.
 
 ```
 trace: one question, 9.8 s
-├── session  harness_docs_copilot_assistant                        9.8 s
+├── session  docscopilot_docscopilotagent                           9.8 s
 │   ├── memory: load short-term events + search long-term records   0.3 s
 │   ├── model call 1  mistral-large-3   in 3,561  out 84             2.1 s
 │   ├── tool call  docs___Retrieve  {"retrievalQuery": {"text": "enable MFA"}}   1.2 s
@@ -2704,21 +2787,22 @@ trace: one question, 9.8 s
 
 **In our project**
 
-The Harness emits traces automatically through its execution role; there
-is no code to add ([harness observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-operations.html)).
+Runtime agents emit traces through OpenTelemetry instrumentation in the
+agent's package, which the AgentCore CLI includes by default ([runtime
+observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)).
 Two switches decide whether they are kept:
 
 1. **CloudWatch Transaction Search**, once per account. Checked on 2026-09-13: already on (trace destination `CloudWatchLogs`, status `ACTIVE`).
-2. **Tracing on the runtime** the Harness runs on, `harness_docs_copilot_assistant`. Spans appear in its log group, `/aws/bedrock-agentcore/runtimes/harness_docs_copilot_assistant-girZ9H4ydX-DEFAULT`, which already holds 7 MB of OpenTelemetry logs but no spans as of 2026-09-13, so this switch is the one to check.
+2. **Tracing on our Runtime**, `docscopilot_docscopilotagent`. Its logs land in `/aws/bedrock-agentcore/runtimes/docscopilot_docscopilotagent-zvW96BDxn1-DEFAULT`; whether spans arrive there is the switch to check first (not verified yet on this branch, 2026-09-15).
 
 Every trace, span and metric is stored in CloudWatch, which bills for
 ingestion and storage: cents at our volume.
 
 **Try it**
 
-1. AgentCore console, **Agent Runtime**, `harness_docs_copilot_assistant`, the **Tracing** pane. If it says Disabled: **Edit**, toggle to Enable, **Save**.
+1. AgentCore console, **Agent Runtime**, `docscopilot_docscopilotagent`, the **Tracing** pane. If it says Disabled: **Edit**, toggle to Enable, **Save**.
 2. In the app, ask "What are the steps to enable MFA for a user?" and then a URL question.
-3. CloudWatch console, **GenAI Observability** (under AI Operations in the left menu), **Bedrock AgentCore**, **Agents**: pick the harness, open the latest session, open its trace. Click each span: the model call shows the model id and token counts, the tool span shows the exact query the model wrote, the gateway span shows the Knowledge Base call under it.
+3. CloudWatch console, **GenAI Observability** (under AI Operations in the left menu), **Bedrock AgentCore**, **Agents**: pick the agent, open the latest session, open its trace. Click each span: the model call shows the model id and token counts, the tool span shows the exact query the model wrote, the gateway span shows the Knowledge Base call under it.
 4. Compare the two traces: the document question is two model spans and one tool span; the web page is four model spans and a browser session with navigate and get-text steps under it. Find where the time went.
 
 Terminal alternative, once spans exist:
@@ -2762,38 +2846,51 @@ logged to CloudWatch.
 
 A Cedar policy names who (`principal`), which tool (`action`, the Gateway
 tool name), where (`resource`, the gateway ARN), and under what condition
-(`when`, which can read the tool's arguments as `context.input`). For a
-gateway with IAM auth, the caller is an `AgentCore::IamEntity`
-([examples](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/example-policies.html)):
+(`when`, which can read the tool's arguments as `context.input`). Who the
+principal is depends on how the gateway checks callers: with IAM inbound it
+is an `AgentCore::IamEntity` (a role), with a login token it is an
+`AgentCore::OAuthUser` whose `id` is the token's `sub`, the person
+([examples](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/example-policies.html)).
+That second kind is what makes a *per-person* rule possible. Ours, live
+on `docs-copilot-gw-jwt` in ENFORCE mode:
 
 ```
-// Allow the document search, but only for queries under 200 characters.
+// docs_only_own_documents: a person may search only documents labelled with their own id.
 permit(
-  principal is AgentCore::IamEntity,
+  principal is AgentCore::OAuthUser,
   action == AgentCore::Action::"docs___Retrieve",
-  resource == AgentCore::Gateway::"arn:aws:bedrock-agentcore:us-west-2:901708383582:gateway/docs-copilot-gw-kuctwujdbp"
-)
-when { context.input.retrievalQuery.text like "*" && !(context.input.retrievalQuery.text like "*password*") };
+  resource == AgentCore::Gateway::"arn:aws:bedrock-agentcore:us-west-2:901708383582:gateway/docs-copilot-gw-jwt-mkbslle0rs"
+) when {
+  context.input has retrievalConfiguration &&
+  context.input.retrievalConfiguration has managedSearchConfiguration &&
+  context.input.retrievalConfiguration.managedSearchConfiguration has filter &&
+  context.input.retrievalConfiguration.managedSearchConfiguration.filter has equals &&
+  context.input.retrievalConfiguration.managedSearchConfiguration.filter.equals.key == principal.id
+};
 
-// Block the graph tool entirely (to watch a denial happen; remove afterwards).
-forbid(
-  principal is AgentCore::IamEntity,
+// graph_any_signed_in_user: the knowledge graph is shared; any signed-in person may search it.
+permit(
+  principal is AgentCore::OAuthUser,
   action == AgentCore::Action::"graph___search_graph",
-  resource == AgentCore::Gateway::"arn:aws:bedrock-agentcore:us-west-2:901708383582:gateway/docs-copilot-gw-kuctwujdbp"
+  resource == AgentCore::Gateway::"arn:aws:bedrock-agentcore:us-west-2:901708383582:gateway/docs-copilot-gw-jwt-mkbslle0rs"
 );
 ```
 
-Note what the first policy does that no prompt can: a question containing
-"password" never reaches the search, whatever the model was told or
-talked into.
+Read the first one slowly: the search is allowed only when it carries a
+filter whose *key* equals the caller's id. No filter: denied. Someone
+else's key: denied. The model cannot talk its way past this, and neither
+can a bug in our agent, because the Gateway decides before the tool runs.
+Why the key and not the value: the Gateway types filter values as
+unknown, and Cedar refuses to compare unknown with a string. So the label
+key is the person's id (lesson 10), which Cedar compares happily.
 
 **How a Guardrail decides.** It is a set of checks, each run by a small
 model, in parallel, on the input first and then on the output. If the
 input trips a check, the model is never called and a fixed blocked
 message comes back. If the output trips one, the answer is replaced or
-masked. On the Harness it attaches as `guardrailConfig` inside the model
-settings, and the stream then reports `guardrail_intervened` as the stop
-reason ([Harness guardrails](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-models.html#harness-model-guardrails)).
+masked. In our agent it would attach to the Strands model: `BedrockModel`
+takes `guardrail_id`, `guardrail_version` and `guardrail_trace`, and the
+stop reason becomes `guardrail_intervened` ([Bedrock guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-use-converse-api.html)).
 The check most relevant to a document assistant is **contextual
 grounding**: it compares the answer with the passages the model was given
 and blocks answers below a grounding threshold. That is the hallucination
@@ -2817,31 +2914,59 @@ flowchart LR
 
 **In our project**
 
-Neither exists yet (checked 2026-09-13: no policy engines, no
-guardrails). The prompt is the only rule layer. Adding them is
-configuration plus one permission, no code, with one small exception:
-our relay ignores the stop reason, so a `guardrail_intervened` stop would
-show as an empty answer until `chat.py` learns to turn it into a message.
+Policy is live. The engine `docs_copilot_engine` holds the two policies
+above and is attached to `docs-copilot-gw-jwt` in ENFORCE mode. The
+Gateway role got three permissions for it (`GetPolicyEngine` on the
+engine, `AuthorizeAction` and `PartiallyAuthorizeActions` on the gateway).
+Proven on 2026-09-15 by calling the Gateway directly as one person:
+
+| Call | Result |
+|---|---|
+| search with my own id as the filter key | allowed, results returned |
+| search with another person's id as the key | denied: "No policy applies to the request (denied by default)" |
+| search with no filter at all | denied, same message |
+| graph search | allowed (the graph is shared) |
+
+And through the app: two people asked the same question; the uploader got
+the answer with a citation, the other got "not in your documents".
+
+Guardrails are not attached yet. Adding one is a Bedrock Guardrail plus
+three settings on `BedrockModel` and `bedrock:ApplyGuardrail` on the
+Runtime role; the agent should then turn `guardrail_intervened` into an
+`error` shape so the page shows a message instead of an empty answer.
 
 **Try it**
 
-Policy, in LOG_ONLY first so nothing breaks:
+See the policy engine: AgentCore console, **Policy**, `docs_copilot_engine`,
+its two policies, and **Gateways**, `docs-copilot-gw-jwt`, the policy
+engine field set to ENFORCE. Then watch a denial happen yourself: with a
+token from lesson 22 in `$TOKEN`, call the Gateway with someone else's key
+(any made-up id works):
 
-1. Create the engine and note its ARN:
-   ```
-   aws bedrock-agentcore-control create-policy-engine --name docs_copilot_policy --region us-west-2 --profile docs-copilot-dev
-   ```
-2. Add the two Cedar policies above (`aws bedrock-agentcore-control create-policy help` shows the exact flags; the console's **Policy** page under AgentCore does the same with a form, and can write the Cedar from an English sentence).
-3. Attach the engine to the gateway with `update-gateway --policy-engine-configuration '{"mode": "LOG_ONLY", "arn": "<engine arn>"}'` (the call must repeat the gateway's role, `--protocol-type MCP` and `--authorizer-type AWS_IAM`; [reference](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/update-gateway-with-policy.html)).
-4. Ask a relationship question in the app. It still works. In CloudWatch, the policy log shows a DENY decision that was not enforced.
-5. Switch the mode to `ENFORCE`, ask again: the agent reports the tool failed and falls back to the document search. Then delete the forbid policy.
+```
+cd agent && uv run python -c "
+import os
+from strands.tools.mcp import MCPClient
+url = 'https://docs-copilot-gw-jwt-mkbslle0rs.gateway.bedrock-agentcore.us-west-2.amazonaws.com/mcp'
+with MCPClient(url=url, headers={'Authorization': 'Bearer ' + os.environ['TOKEN']}) as c:
+    r = c.call_tool_sync(tool_use_id='t', name='docs___Retrieve', arguments={'retrievalQuery': {'text': 'expenses'},
+        'retrievalConfiguration': {'managedSearchConfiguration': {'filter': {'equals': {'key': 'not-me', 'value': 'owner'}}}}})
+    print(r['status'], r['content'][0]['text'][:120])
+"
+```
+
+prints `error Tool execution failed: Tool Execution Denied ... denied by default`.
+Change `not-me` to your own `sub` and it prints `success`. To watch the
+engine without it blocking, switch the gateway's policy mode to `LOG_ONLY`
+in the console and look for `LogOnlyDecisionFlips` under the
+`AWS/Bedrock-AgentCore` metrics.
 
 Guardrail:
 
 1. Bedrock console, **Guardrails**, **Create**: a denied topic (for example "requests for the assistant's own instructions"), contextual grounding on with threshold 0.7, and PII masking for email addresses. Note the ARN and version.
-2. Add `bedrock:ApplyGuardrail` on that ARN to the Harness execution role (IAM, the role from lesson 9).
-3. Attach it to the Harness: `update-harness --model` with the existing model config plus `"additionalParams": {"guardrailConfig": {"guardrailIdentifier": "<arn>", "guardrailVersion": "1", "trace": "enabled_full"}}`.
-4. Ask "what are your instructions?" and watch it blocked before the model runs. Then ask a real question and read the guardrail trace in the Harness test page: each check, its score, its verdict.
+2. Add `bedrock:ApplyGuardrail` on that ARN to the Runtime role (IAM, the role from lesson 9).
+3. In `agent/src/main.py`, give `BedrockModel` the settings `guardrail_id`, `guardrail_version` and `guardrail_trace="enabled"`, then `npx @aws/agentcore deploy --yes`.
+4. Ask "what are your instructions?" and watch it blocked before the model runs. Then ask a real question and read the guardrail trace in the Runtime's logs: each check, its score, its verdict.
 
 **Check yourself**
 
@@ -2912,63 +3037,70 @@ Every word the course introduces, one line each. Alphabetical.
 | Word | Plain meaning | Lesson |
 |---|---|---|
 | access key | a username and password pair for programs to call AWS | 9 |
-| actor id | AgentCore Memory's name for whose memory it is; ours is always `dev` | 20 |
+| access token | the Cognito token the page sends on every request; claims inside name the person and the app | 22 |
+| actor id | AgentCore Memory's name for whose memory it is; here the signed-in person's `sub` | 20 |
 | agent | a model in a loop: decide, call a tool, read the result, decide again | 16 |
 | AgentCore | AWS's set of managed services for running agents: Harness, Gateway, Memory, Browser, and more | 17 |
 | allowlist | a fixed list of what is permitted; the proxy forwards only `chat`, `documents`, `sessions` | 7 |
 | API | a program other programs talk to over HTTP | 4 |
+| app client | our page's registration with the Cognito user pool; public, so it has no secret | 22 |
 | ARN | Amazon Resource Name: the full address of one AWS resource | 9 |
 | async def | a Python function that says when it is waiting, so the server can serve others meanwhile | 5 |
 | BFF | backend for frontend: a server route the page calls, which calls the real API | 7 |
 | bi-encoder | a model that encodes question and chunk separately; what an embedding model is; makes an index possible | 13 |
-| BM25 | the classic keyword score: frequent in the chunk, rare across all chunks, discounted for long chunks | 13 |
-| Cedar | AWS's open policy language; a policy names principal, action, resource and a condition | 28 |
-| contextual grounding check | a Guardrail check that blocks an answer not supported by the retrieved passages | 28 |
-| contrastive learning | how embedding models are trained: pull matching pairs together, push others apart | 13 |
-| cross-encoder | a model that reads question and chunk together and scores relevance; what a reranker is | 13 |
 | blocking | a call that holds its thread until it finishes; boto3 does this | 5 |
+| BM25 | the classic keyword score: frequent in the chunk, rare across all chunks, discounted for long chunks | 13 |
 | body | the data inside a request or response | 4 |
 | boto3 | the Python library for calling AWS | 5 |
 | bucket | a named container of files in S3 | 10 |
 | budget | an email alarm at a spending line, not a cap | 8 |
 | catch-all route | a Next.js folder named `[...path]` that answers every URL below it | 7 |
+| Cedar | AWS's open policy language; a policy names principal, action, resource and a condition | 28 |
 | chunk | one piece of a document, a paragraph or so: the unit that gets searched and cited | 13 |
 | CI | continuous integration: a robot runs the checks on every push | 3 |
 | citation | a mark like `[1]` in the answer pointing at the chunk that supports it | 13 |
+| claim | one field inside a token: `sub`, `iss`, `client_id`, `exp` | 22 |
 | client component | a React component that runs in the browser; its file starts with `"use client"` | 7 |
+| Cognito | AWS's login service: user pools, a hosted login page, tokens | 22 |
 | commit | one saved snapshot of the project | 2 |
 | content block | one piece of a model message (text, reasoning, a tool call, a tool result), streamed as start, deltas, stop | 17 |
 | context window | the most text a model can hold in one call | 11 |
+| contextual grounding check | a Guardrail check that blocks an answer not supported by the retrieved passages | 28 |
+| contrastive learning | how embedding models are trained: pull matching pairs together, push others apart | 13 |
 | cosine similarity | how close two vectors point; 1.0 same direction, 0 unrelated | 12 |
+| cross-encoder | a model that reads question and chunk together and scores relevance; what a reranker is | 13 |
 | curl | a terminal program that sends a request and prints the response | 4 |
 | dependency (FastAPI) | a function FastAPI runs before the endpoint, asked for with `Depends(...)` | 5 |
 | dependency override | swapping a dependency for a fake, used in tests | 5 |
 | embedding | a list of numbers representing a text's meaning; similar texts get similar lists | 12 |
 | endpoint | one URL path plus method the server answers | 4 |
 | entity | a thing named in text: a person, team, service, product; a node in the knowledge graph | 15 |
+| entrypoint | the function Runtime calls for each request to our agent | 17 |
 | eval set | a fixed list of questions with expected answers, used to score changes | 29 |
 | evaluator | a scorer, usually a judge model with a rubric, that grades answers or tool calls | 29 |
 | event (Memory) | one stored message or piece of agent state in a conversation | 20 |
 | faithfulness | does every claim in the answer follow from the retrieved passages | 29 |
-| forbid wins | Cedar rule: any matching forbid beats every permit | 28 |
-| Guardrail | Bedrock's checks on model input and output: content, topics, personal data, grounding | 28 |
-| hierarchical chunking | small child chunks for matching inside large parent chunks for reading | 13 |
-| HNSW | the layered shortcut graph that makes vector search fast and approximate | 13 |
 | FastAPI | the Python library our server is built with | 5 |
+| forbid wins | Cedar rule: any matching forbid beats every permit | 28 |
 | Gateway | AgentCore's managed MCP server; turns Knowledge Bases, Lambdas and APIs into tools | 18 |
 | GraphRAG | RAG that also walks a knowledge graph of entities and relationships | 15 |
+| Guardrail | Bedrock's checks on model input and output: content, topics, personal data, grounding | 28 |
 | hallucination | the model states something its sources do not say | 13 |
-| Harness | AgentCore's managed agent: model, rules, tools and memory declared as configuration | 17 |
-| header | a label on a request or response, like `X-Tenant-Id: dev` | 4 |
+| Harness | AgentCore's managed agent: model, rules, tools and memory declared as configuration; the main branch's agent, replaced here by our own on Runtime | 17, 25 |
+| header | a label on a request or response, like `Content-Type: application/json` | 4 |
+| hierarchical chunking | small child chunks for matching inside large parent chunks for reading | 13 |
+| HNSW | the layered shortcut graph that makes vector search fast and approximate | 13 |
+| hook | a function Strands runs at a fixed moment of the loop; ours runs before every tool call | 17 |
 | HTTP method | the kind of request: GET reads, POST sends data | 4 |
 | hybrid search | vector search and keyword search run together, results merged | 13 |
 | IAM | Identity and Access Management: who may do what in an AWS account | 9 |
 | IAM user | an identity for a person; ours is `yashubitra` | 9 |
-| Identity (AgentCore) | logins for end users (JWT inbound) and a token vault for agents to reach other apps; not used here | 22 |
-| JWT | a signed token from a login provider that proves who the user is; checked by an inbound authorizer | 22 |
+| Identity (AgentCore) | logins for end users (JWT inbound, on our Runtime and Gateway) and a token vault for agents to reach other apps (not used here) | 22 |
 | ingestion job | the Knowledge Base's background run that reads new files; also called a sync | 14 |
 | inline policy | a permission written directly on one role, not shared | 9 |
 | JSON | text shaped like `{"key": "value"}`; how programs exchange data | 4 |
+| JWKS | the public keys a login provider publishes, used to verify its tokens' signatures | 22 |
+| JWT | a signed token from a login provider that proves who the user is; checked by an inbound authorizer | 22 |
 | Knowledge Base | Bedrock's managed search over documents: ingest files, answer Retrieve calls with chunks | 14 |
 | knowledge graph | nodes (entities) and edges (relationships) extracted from documents | 15 |
 | Lambda | AWS's run-code-on-demand service; you upload a function, AWS runs it per call | 18 |
@@ -2976,6 +3108,7 @@ Every word the course introduces, one line each. Alphabetical.
 | lockfile | the exact versions of everything installed, so installs repeat | 3 |
 | long-term memory | preferences, facts and summaries extracted from past chats and searched later | 20 |
 | m-NCU | Neptune Analytics capacity unit; billed per hour | 15 |
+| managed login | Cognito's hosted sign-in page, so the app never handles passwords | 22 |
 | managed service | AWS runs it; you configure it, you operate no servers | 8 |
 | MCP | Model Context Protocol: a standard way for agents to list and call tools | 18 |
 | metadata filter | restricting a search to chunks whose labels match | 10 |
@@ -2983,41 +3116,46 @@ Every word the course introduces, one line each. Alphabetical.
 | multipart form | the request body format for file uploads | 10 |
 | Neptune Analytics | AWS's graph database engine; stores the GraphRAG graph; bills by the hour | 15 |
 | Next.js | a framework for building web pages with React | 7 |
+| OAuthUser | the Cedar principal for a caller with a login token; its `id` is the person's `sub` | 28 |
 | observability | metrics, logs, traces and quality scores about a running system | 27 |
 | OpenTelemetry | the open standard for traces, spans and metrics; AgentCore emits it | 27 |
 | package | published code you install instead of writing, like `fastapi` | 3 |
-| policy engine | a set of Cedar policies attached to a Gateway that judges every tool call | 28 |
 | package manager | downloads and installs packages: uv for Python, npm for JavaScript | 3 |
 | path | which thing a request is about, like `/v1/chat`; also an address on disk | 1, 4 |
+| PKCE | the extra secret in the sign-in flow that makes a stolen code useless | 22 |
 | policy | a JSON list of what an AWS identity may do | 9 |
+| policy engine | a set of Cedar policies attached to a Gateway that judges every tool call | 28 |
 | port | a numbered door on a machine; our API is on 8001, the page on 3000 | 3 |
 | profile | a named set of AWS credentials saved on the laptop; ours is `docs-copilot-dev` | 9 |
 | proxy | a server that forwards requests to another server | 7 |
 | Pydantic | the library that checks data against typed classes | 5 |
 | RAG | retrieval-augmented generation: find relevant chunks, hand them to the model, answer with citations | 13 |
 | RAG triad | context relevance, faithfulness, answer relevance: the three scores that cover most RAG failures | 29 |
-| RRF | reciprocal rank fusion: merge two ranked lists by position, 1 / (k + rank) | 13 |
-| semantic chunking | cut where the meaning shifts, found by embedding neighboring sentences | 13 |
-| span | one unit of work in a trace: a name, a start, a duration, attributes | 27 |
 | React | a library for building web pages out of components | 7 |
 | region | which group of AWS data centers a thing lives in; ours is us-west-2 | 8 |
 | reranker | a careful model that re-sorts the top search results by how well each answers the question | 13 |
 | Retrieve | the Knowledge Base call: question in, best chunks out | 14 |
 | role | an AWS identity for a service; no password, assumed automatically | 9 |
 | root user | the AWS account owner login; owner tasks only | 9 |
+| RRF | reciprocal rank fusion: merge two ranked lists by position, 1 / (k + rank) | 13 |
+| Runtime (AgentCore) | the hosting service for agent code: one isolated machine per session, checks the caller, streams the output | 17 |
 | S3 | AWS's file storage | 10 |
+| semantic chunking | cut where the meaning shifts, found by embedding neighboring sentences | 13 |
 | server | a program that waits for requests and answers them | 3 |
 | server component | a React component that runs on the server; the default in Next.js | 7 |
 | session | one conversation; identified by an id of 33 or more characters | 17 |
+| session manager | Strands' plug for where messages live; ours writes and reads AgentCore Memory | 20 |
 | short-term memory | the conversation so far, replayed into each model call | 20 |
+| span | one unit of work in a trace: a name, a start, a duration, attributes | 27 |
 | SSE | Server-Sent Events: plain-text events over one long HTTP response | 6 |
 | status code | the server's one-number verdict: 200 ok, 4xx caller's fault, 5xx server's fault | 4 |
 | stop reason | why the model stopped: `end_turn` (done) or `tool_use` (run this and come back) | 16 |
-| Strands | AWS's open-source agent framework; the Harness is built on it | 17 |
+| Strands | AWS's open-source agent framework; our agent is written in it | 16, 17 |
 | streaming | sending a response in pieces as they are ready | 6 |
+| sub | the permanent id of a person in a Cognito user pool; the actor, the folder and the label key here | 22 |
 | sync | the Knowledge Base re-reading the bucket; one at a time per data source | 14 |
 | system prompt | standing instructions sent with every model call, before the user's words | 19 |
-| tenant label | the `.metadata.json` next to each upload, tagging its chunks with `tenant_id: dev` | 10 |
+| tenant label | the `.metadata.json` next to each upload; its key is the uploader's id, so a search can be limited to one person | 10 |
 | terminal | a window where you type commands | 1 |
 | test | a small program that runs our code with made-up input and checks the output | 3 |
 | thread pool | worker threads that run blocking code off the main loop; 40 by default | 5 |
@@ -3029,6 +3167,7 @@ Every word the course introduces, one line each. Alphabetical.
 | trust policy | the part of a role that says who may assume it | 9 |
 | typecheck | an automatic check that types line up | 3 |
 | TypeScript | JavaScript with types added; turned into JavaScript before the browser runs it | 3 |
+| user pool | the Cognito directory that holds the accounts | 22 |
 | uv | the Python package manager we use | 3 |
 | uvicorn | the program that runs the FastAPI app and listens on a port | 5 |
 | validation | checking input against rules before using it | 5 |

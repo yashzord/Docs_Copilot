@@ -1,6 +1,6 @@
 """POST /v1/chat: one question in, the agent's answer out as Server-Sent Events.
 
-The agent is the AgentCore Harness (docs/learning/aws.md 10). It keeps the
+The agent is the AgentCore Harness (lesson 17). It keeps the
 conversation in AgentCore Memory, so the browser sends only the new message
 and a session id, never the history.
 
@@ -68,7 +68,7 @@ def harness_stream(
     client: Annotated["BedrockAgentCoreClient", Depends(get_agentcore)],
 ) -> Iterable["InvokeHarnessStreamOutputTypeDef"]:
     """Open the agent's stream before the response starts, so a refusal can
-    still become a real 503 or 502 (same reason as in D1, docs/learning/D1.md)."""
+    still become a real 503 or 502 (lesson 6)."""
     try:
         # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agentcore/client/invoke_harness.html
         response = client.invoke_harness(
@@ -115,7 +115,7 @@ def to_sources(raw: str) -> list[dict[str, Any]]:
 def relay(events: Iterable["InvokeHarnessStreamOutputTypeDef"]) -> Iterator[ServerSentEvent]:
     """Translate the harness's raw events into our small SSE vocabulary.
 
-    The harness streams every step of its loop (docs/learning/ai.md 6.1): the
+    The harness streams every step of its loop (lesson 16): the
     model's reasoning, a tool call, the tool's result, then the answer. Each
     content block arrives as start, several deltas, stop, so a tool call's input
     and a tool's result are collected until their block stops.

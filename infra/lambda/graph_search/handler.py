@@ -33,7 +33,7 @@ def lambda_handler(event: dict[str, Any], context: Any, kb: Any = None) -> dict[
     if not query:
         return {"error": "query is required"}
     # GraphRAG: a vector search finds chunks, then the graph adds chunks linked to
-    # them through shared entities (docs/learning/ai.md 5.2).
+    # them through shared entities (lesson 15).
     # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agent-runtime/client/retrieve.html
     response = (kb or _kb).retrieve(
         knowledgeBaseId=KB_ID,

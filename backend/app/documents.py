@@ -10,7 +10,7 @@ Each upload writes two objects to S3:
     tenants/dev/handbook.pdf.metadata.json    {"metadataAttributes": {"tenant_id": "dev"}}
 
 The second one is how the Knowledge Base learns which tenant every chunk of the
-file belongs to, so a search can be filtered to one tenant (docs/learning/aws.md 7.4a).
+file belongs to, so a search can be filtered to one tenant (lesson 10).
 https://docs.aws.amazon.com/bedrock/latest/userguide/s3-data-source-connector.html
 """
 

@@ -2,7 +2,7 @@
 
 The harness is replaced by FakeAgentCore, so tests need no network, no AWS
 account, and cost nothing. The event shapes copy a real InvokeHarness stream
-captured on 2026-09-11 (docs/learning/D2.md), shortened.
+captured on 2026-09-11, shortened.
 """
 
 import json

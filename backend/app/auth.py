@@ -6,8 +6,8 @@ hands the routes two things:
 
     user.id     the `sub` claim: Cognito's permanent id for the person. It is the
                 Memory actor id, the S3 folder name and the document label.
-    user.token  the raw token, which the chat route forwards to the Harness.
-                The Harness checks it again itself (its inbound JWT authorizer).
+    user.token  the raw token, which the chat route forwards to the agent.
+                Runtime checks it again itself (its inbound JWT authorizer).
 
 What "checks the token" means, in order (docs/course/, lesson 31):
     1. signature: signed by one of the user pool's public keys (fetched from

@@ -1,9 +1,9 @@
-"""Past conversations for the chat sidebar, read from the harness's AgentCore Memory.
+"""Past conversations for the chat sidebar, read from the agent's AgentCore Memory.
 
     GET /v1/sessions                          this user's conversations, newest first
     GET /v1/sessions/{session_id}/messages    one conversation, oldest message first
 
-The harness writes Memory itself. One turn with one search becomes about ten events:
+The agent writes Memory itself. One turn with one search becomes about ten events:
 a "conversational" event per message (question, tool call, tool result, answer),
 each holding the message as JSON text, plus "blob" events with the agent's
 internal state. Only the questions and the answer text come back from here.

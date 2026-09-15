@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     aws_profile: str | None = None
     aws_region: str = "us-west-2"
 
-    # Everything below is required, no default: the app refuses to start without it.
-    # IDs come from the AWS console; docs/learning/aws.md says where each one lives.
+    # Everything below is required, no default: the first request fails without it.
+    # IDs come from the AWS console; the course (docs/course/) says where each one lives.
 
     # Documents: the bucket uploads go to, and the Knowledge Base that indexes it.
     s3_bucket: str

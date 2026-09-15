@@ -3,7 +3,7 @@
 The Gateway's Knowledge Base connector only accepts managed Knowledge Bases,
 so this small Lambda sits in between:
 
-    harness --MCP--> Gateway --invoke--> this function --Retrieve--> GraphRAG Knowledge Base
+    agent --MCP--> Gateway --invoke--> this function --Retrieve--> GraphRAG Knowledge Base
 
 It answers in the same shape as the managed connector's Retrieve tool
 ({"retrievalResults": [...]}), so the chat relay turns its passages into
@@ -33,7 +33,7 @@ def lambda_handler(event: dict[str, Any], context: Any, kb: Any = None) -> dict[
     if not query:
         return {"error": "query is required"}
     # GraphRAG: a vector search finds chunks, then the graph adds chunks linked to
-    # them through shared entities (docs/learning/ai.md 5.2).
+    # them through shared entities (lesson 15).
     # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agent-runtime/client/retrieve.html
     response = (kb or _kb).retrieve(
         knowledgeBaseId=KB_ID,

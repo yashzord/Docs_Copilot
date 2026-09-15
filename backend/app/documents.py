@@ -7,14 +7,13 @@
 Each upload writes two objects to S3:
 
     users/<user id>/handbook.pdf                  the file
-    users/<user id>/handbook.pdf.metadata.json    {"metadataAttributes": {"user_id": "<user id>"}}
+    users/<user id>/handbook.pdf.metadata.json    {"metadataAttributes": {"<user id>": "owner"}}
 
 The second one is how the Knowledge Base learns which user every chunk of the
-file belongs to, so a search can be limited to `user_id`. Listing already uses
-the S3 prefix. Retrieve is not forced to that filter yet: the Harness still
-searches the whole index; `agent/main.py` injects the filter when that agent
-is the chat path, and a Gateway Cedar policy (lesson 34) would make it
-mandatory. The user id is Cognito's `sub` (lesson 31).
+file belongs to. Listing uses the S3 prefix. Every document search is limited
+to the asker's files twice: `agent/src/main.py` adds a filter on this key, and
+the Gateway's Cedar policy (lesson 34) refuses a search without it. The user
+id is Cognito's `sub` (lesson 31). The graph search is not filtered (lesson 34).
 https://docs.aws.amazon.com/bedrock/latest/userguide/s3-data-source-connector.html
 """
 

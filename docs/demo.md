@@ -38,6 +38,80 @@ watch, while the questions are answered from the copy already indexed.
 
 ---
 
+## Know what you built, on one page
+
+Read this before the demo until you can say it without looking. Every
+line has a lesson number in `docs/course.md` for the full story.
+
+**The one sentence.** "Docs Copilot: sign in, upload documents, ask
+questions, get answers with the exact sources, from one AI agent, our own
+code hosted by AWS, that can also read live web pages. Every person sees
+only their own documents, chats and memory."
+
+**The pieces, and who made each one**
+
+| Piece | What it is, in plain words | Ours or AWS | Lesson |
+|---|---|---|---|
+| the page | the chat window in the browser (Next.js). It sends your one message and draws the answer as it streams in | ours, `frontend/` | 7 |
+| the proxy | a tiny door inside the page's server that forwards `/api/...` to the backend, so the browser never talks to AWS | ours, `frontend/app/api` | 7 |
+| the login | Cognito's hosted sign-in page. The app never sees a password; it gets a token that every hop checks | AWS | 22 |
+| the backend | the Python server (FastAPI) on port 8001: verifies your token, uploads files, calls the agent with your token, streams the answer back | ours, `backend/app` | 5, 6, 22 |
+| S3 | the bucket where every uploaded file and its label live | AWS | 10 |
+| the Knowledge Base | AWS's managed search over the files: it chunks, embeds and indexes each file, and answers "find me the passages about X" | AWS | 13, 14 |
+| the graph Knowledge Base + Neptune | a second index that also extracts things and how they relate, for "how does X relate to Y" questions. Bills by the hour: started 45 minutes before, stopped after | AWS | 15 |
+| the Gateway | the agent's tool menu (an MCP server): the Knowledge Base and the Lambda become two tools. It checks your token and asks its policy before every call | AWS | 18, 28 |
+| the Lambda | 40 lines of ours that AWS runs on demand: it searches the graph Knowledge Base for the Gateway | ours, `infra/lambda` | 18 |
+| the agent | 200 lines of Python (Strands) that AWS hosts on AgentCore Runtime in its own small machine per session. It runs the loop, calls the tools with your token, and adds the "only my documents" filter before every search | ours, `agent/src/main.py` | 17 |
+| the policy | Cedar rules on the Gateway: a document search must carry the caller's own filter, or it is refused before it runs | AWS | 28 |
+| the model | Mistral Large 3, called through Bedrock. The only part that "thinks" | AWS | 11 |
+| Memory | every chat's messages, plus facts and preferences extracted from them, kept per user | AWS | 20 |
+| the browser tool | a real Chrome in a sandbox that the agent drives to read a web page | AWS | 21 |
+
+**One question, in eight steps** (lesson 23 has the twelve-step version):
+
+1. You type a question. The page sends only that line, a chat id and your login token to the backend.
+2. The backend verifies the token (no token, no call: refused before anything costs money) and calls the agent on Runtime with the same token.
+3. Runtime verifies the token again, and our agent loads the chat so far from Memory under your id and asks the model: "here are the rules, the question, and your tools. What do you want to do?"
+4. The model answers with a tool call: "search the documents for MFA steps".
+5. The agent's hook adds the filter "only documents labelled with this person's id", then calls the Gateway with your token. The Gateway checks the token, its policy checks the filter is yours, and the Knowledge Base returns your five best passages.
+6. The agent asks the model again: "here is the question and the passages. Answer, and cite them as [1], [2]."
+7. The answer streams back through the backend and the proxy to the page, word by word, with the tool line above it and the source cards under it.
+8. The agent saves the turn to Memory under your id. Minutes later, background jobs extract facts and preferences from it.
+
+That is "2 model calls" under every answer: one to decide, one to write.
+
+**Words you will say, and what they mean**
+
+- **Agent:** a model in a loop with tools. The model never runs anything; it asks, the loop runs the tool and comes back.
+- **Tool:** a function the agent may ask for: the document search, the graph search, the browser.
+- **RAG:** find the relevant passages first, then hand them to the model with the question, so it answers from your documents instead of guessing.
+- **Chunk, embedding, vector search:** documents are cut into paragraphs; each paragraph becomes a list of numbers that captures its meaning; a search finds the paragraphs whose numbers are closest to the question's.
+- **Hybrid search and reranking:** meaning-search plus exact-word search, merged, then a careful second model re-sorts the top results.
+- **MCP:** the standard plug between an agent and its tools. The Gateway speaks it.
+- **Streaming:** the answer arrives in pieces, so the first word shows almost at once.
+- **Identity:** every call is made by some identity that needs permission for exactly that call. Your login token is one identity, checked by the backend, by Runtime and by the Gateway; the agent's role and the Gateway's role are the others.
+- **OAuth, 3-legged:** you sign in and consent on the login service's page, and the app gets a token to act for you. The 2-legged kind, a program signing in as itself, is not used here.
+
+**Numbers worth knowing**
+
+- A document question: about 1 cent, 2 model calls, 10 to 15 thousand tokens in.
+- A web page: 2 to 8 cents, 3 or 4 model calls, the whole page's text goes into the model.
+- The graph: $0.48 an hour running, about 5 cents an hour stopped. Everything else bills per use.
+- Code we wrote: about 2,300 lines, plus 73 tests. The rest is AWS services we configured.
+
+**Questions people ask, with the honest answer**
+
+- *Why not just ask ChatGPT?* It has never seen your documents. This answers from them and shows you the exact passage.
+- *Can it be wrong?* Yes. The citation is not proof, it is a pointer. Open the source card and check. Lesson 13 names the two failures: the search missed, or the model wrote something the passage does not say.
+- *Why AWS managed services instead of building it?* Chunking, embeddings, hybrid search, reranking, memory, the agent loop, the browser: each would be weeks to build well. Configuring them took days and cost cents. Lesson 25 lists what we dropped.
+- *Why this model?* Two others were tried: one could not use tools while streaming, one could not drive the browser. Mistral Large 3 did both.
+- *Is it secure? Who can see my documents?* Only you. The agent adds a filter with your id to every search, and the Gateway's policy refuses any search without it. Proven with two accounts: same question, the other person gets nothing.
+- *Why write your own agent instead of the managed one?* The managed Harness could not carry a person's login to the Gateway. Two hundred lines of our own code could, and that is what makes per-person privacy enforceable.
+- *What would you do next?* Tracing of every step, guardrails on the model, and an evaluation set so changes are measured instead of eyeballed.
+- *What broke along the way?* Plenty: lesson 25 has the table. The demo is the version that survived.
+
+---
+
 ## The flow
 
 ### 1. The idea (1 minute, on the map)

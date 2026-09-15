@@ -113,7 +113,7 @@ def test_upload_writes_file_and_user_label_then_starts_both_syncs(s3: "S3Client"
     stored = s3.get_object(Bucket=BUCKET, Key="users/user-a/hand_book.md")["Body"].read()
     assert stored == b"# Handbook"
     assert read_json(s3, "users/user-a/hand_book.md.metadata.json") == {
-        "metadataAttributes": {"user_id": "user-a"}
+        "metadataAttributes": {"user-a": "owner"}
     }
     assert kb.calls == [
         {"knowledgeBaseId": "KB00000000", "dataSourceId": "DS00000000"},

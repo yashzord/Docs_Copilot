@@ -6,10 +6,9 @@ Tests replace them through FastAPI's dependency overrides.
 
 import logging
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import boto3
-from botocore import UNSIGNED
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
@@ -53,36 +52,9 @@ def get_kb_admin() -> "AgentsforBedrockClient":
 
 @lru_cache
 def get_agentcore() -> "BedrockAgentCoreClient":
-    # The AgentCore data API signed with our own AWS credentials: Memory reads
-    # for the sidebar. The Harness is not called this way any more (see below).
+    # The AgentCore data API signed with our own AWS credentials: Memory reads for
+    # the sidebar. The agent itself is called with the user's token (app/chat.py).
     return _session().client("bedrock-agentcore", config=_RETRIES)
-
-
-@lru_cache(maxsize=64)
-def harness_client(token: str) -> "BedrockAgentCoreClient":
-    """A bedrock-agentcore client that speaks for one signed-in user.
-
-    The Harness has an inbound JWT authorizer (lesson 22), so it wants the user's
-    Cognito token in `Authorization: Bearer ...`, not an AWS signature. boto3 has no
-    switch for that, so: signing is turned off (UNSIGNED), and a hook adds the
-    header to every InvokeHarness call just before it is sent. The client still
-    parses the event stream for us, which is the part worth keeping.
-    Cached per token: a token lives an hour and the same user asks many times.
-    An agent can go quiet while it searches or thinks, so wait up to 5 minutes
-    for the next byte instead of boto3's default 60 seconds.
-    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html#_inbound_oauth
-    https://boto3.amazonaws.com/v1/documentation/api/latest/guide/events.html
-    """
-    client = _session().client(
-        "bedrock-agentcore",
-        config=_RETRIES.merge(Config(signature_version=UNSIGNED, read_timeout=300)),
-    )
-
-    def add_bearer(params: dict[str, Any], **_: Any) -> None:
-        params["headers"]["Authorization"] = f"Bearer {token}"
-
-    client.meta.events.register("before-call.bedrock-agentcore.InvokeHarness", add_bearer)
-    return client
 
 
 def upstream_error(err: ClientError | BotoCoreError, action: str) -> HTTPException:

@@ -18,6 +18,7 @@ What this file does with that request, in order:
 The loop itself (model, tool, model, ...) is Strands' event loop.
 """
 
+# ruff: noqa: E501 (the system prompt is long prose)
 import base64
 import json
 import logging
@@ -43,9 +44,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("docs_copilot_agent")
 
 REGION = os.environ.get("AWS_REGION", "us-west-2")
-# Set on the Runtime as environment variables (docs/course.md lesson 26).
-GATEWAY_URL = os.environ["GATEWAY_URL"]
-MEMORY_ID = os.environ["MEMORY_ID"]
+# Public identifiers of our own resources (not secrets), overridable per deployment.
+GATEWAY_URL = os.environ.get(
+    "GATEWAY_URL",
+    "https://docs-copilot-gw-jwt-mkbslle0rs.gateway.bedrock-agentcore.us-west-2.amazonaws.com/mcp",
+)
+MEMORY_ID = os.environ.get("MEMORY_ID", "docs_copilot_assistant-6aIbceHbw1")
 MODEL_ID = os.environ.get("MODEL_ID", "mistral.mistral-large-3-675b-instruct")
 
 DOCS_TOOL = "docs___Retrieve"
@@ -110,7 +114,9 @@ def memory_for(user_id: str, session_id: str) -> AgentCoreMemorySessionManager:
         retrieval_config={
             "/actors/{actorId}/facts/": RetrievalConfig(top_k=5, relevance_score=0.3),
             "/actors/{actorId}/preferences/": RetrievalConfig(top_k=5, relevance_score=0.3),
-            "/actors/{actorId}/summaries/{sessionId}/": RetrievalConfig(top_k=1, relevance_score=0.1),
+            "/actors/{actorId}/summaries/{sessionId}/": RetrievalConfig(
+                top_k=1, relevance_score=0.1
+            ),
         },
     )
     return AgentCoreMemorySessionManager(config, region_name=REGION)
@@ -125,19 +131,29 @@ def translate(event: dict[str, Any]) -> list[dict[str, Any]]:
         # A whole message was added: the model's tool calls, or a tool's results.
         for block in event["message"].get("content", []):
             if "toolUse" in block:
-                out.append({"type": "tool", "name": block["toolUse"]["name"], "input": block["toolUse"]["input"]})
+                out.append(
+                    {
+                        "type": "tool",
+                        "name": block["toolUse"]["name"],
+                        "input": block["toolUse"]["input"],
+                    }
+                )
             elif "toolResult" in block:
-                text = "".join(part.get("text", "") for part in block["toolResult"].get("content", []))
+                text = "".join(
+                    part.get("text", "") for part in block["toolResult"].get("content", [])
+                )
                 out.append({"type": "tool_result", "text": text})
     elif "result" in event:
         metrics = event["result"].metrics
         usage = metrics.accumulated_usage
-        out.append({
-            "type": "usage",
-            "input_tokens": usage.get("inputTokens", 0),
-            "output_tokens": usage.get("outputTokens", 0),
-            "model_calls": metrics.cycle_count,
-        })
+        out.append(
+            {
+                "type": "usage",
+                "input_tokens": usage.get("inputTokens", 0),
+                "output_tokens": usage.get("outputTokens", 0),
+                "model_calls": metrics.cycle_count,
+            }
+        )
     return out
 
 
@@ -174,7 +190,7 @@ async def chat(payload: dict[str, Any], context: Any) -> AsyncIterator[str]:
         async for event in agent.stream_async(message):
             for item in translate(event):
                 yield json.dumps(item)
-    except Exception as err:  # noqa: BLE001 - the last line of the stream must say what broke
+    except Exception as err:
         logger.exception("turn failed user=%s", user_id)
         yield json.dumps({"type": "error", "message": f"{type(err).__name__}: {err}"[:300]})
     finally:

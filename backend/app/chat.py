@@ -1,8 +1,13 @@
 """POST /v1/chat: one question in, the agent's answer out as Server-Sent Events.
 
-The agent is the AgentCore Harness (docs/learning/aws.md 10). It keeps the
-conversation in AgentCore Memory, so the browser sends only the new message
-and a session id, never the history.
+The agent is our Strands agent on AgentCore Runtime (agent/src/main.py, lesson
+17). It keeps the conversation in AgentCore Memory, so the browser sends only
+the new message and a session id, never the history.
+
+The call to the agent carries the signed-in user's own Cognito token. Runtime
+checks it (its JWT authorizer), and the agent passes it on to the Gateway, so
+every hop knows who is asking (lesson 22). AWS SDKs cannot send a bearer token
+to Runtime, so this is a plain HTTPS request with a streaming HTTP client.
 
 Wire format, in order:
 
@@ -22,29 +27,24 @@ import json
 import logging
 import uuid
 from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, Annotated, Any
+from functools import lru_cache
+from typing import Annotated, Any
+from urllib.parse import quote
 
-from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, Depends
+import httpx2
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
 from app.auth import User, get_user, get_user_id
-from app.aws import harness_client, upstream_error
 from app.settings import Settings, get_settings
-
-if TYPE_CHECKING:
-    from mypy_boto3_bedrock_agentcore import BedrockAgentCoreClient
-    from mypy_boto3_bedrock_agentcore.type_defs import InvokeHarnessStreamOutputTypeDef
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# InvokeHarness accepts 33 to 100 letters, digits, dashes or underscores, starting
-# with a letter or digit (read from the API model in boto3, 2026-09-11).
+# Runtime accepts 33 to 100 letters, digits, dashes or underscores, starting
+# with a letter or digit. A UUID is 36 characters.
 SESSION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{32,99}$"
-# Stream events that mean the agent failed after it started answering.
-_ERROR_EVENTS = ("internalServerException", "validationException", "runtimeClientError")
 _EXCERPT_CHARS = 300
 
 
@@ -55,47 +55,83 @@ class ChatRequest(BaseModel):
 
 
 def session_id_for(request: ChatRequest) -> str:
-    # A UUID is 36 characters, inside the 33 to 100 the harness accepts.
     # FastAPI runs this once per request, so every dependency sees the same id.
     return request.session_id or str(uuid.uuid4())
 
 
-def get_harness(user: Annotated[User, Depends(get_user)]) -> "BedrockAgentCoreClient":
-    # A dependency of its own, so tests can swap the client for a fake.
-    return harness_client(user.token)
+@lru_cache
+def get_http() -> httpx2.Client:
+    # One client, shared: it keeps connections open between requests. An agent can
+    # go quiet while it searches or thinks, so wait up to 5 minutes for the next byte.
+    # https://www.python-httpx.org/advanced/clients/
+    return httpx2.Client(timeout=httpx2.Timeout(connect=10, read=300, write=30, pool=10))
 
 
-def harness_stream(
+def agent_url(settings: Settings) -> str:
+    # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-invoke-agent.html
+    arn = quote(settings.agent_runtime_arn, safe="")
+    return (
+        f"https://bedrock-agentcore.{settings.aws_region}.amazonaws.com"
+        f"/runtimes/{arn}/invocations?qualifier=DEFAULT"
+    )
+
+
+def agent_events(
     user: Annotated[User, Depends(get_user)],
     request: ChatRequest,
     session_id: Annotated[str, Depends(session_id_for)],
     settings: Annotated[Settings, Depends(get_settings)],
-    client: Annotated["BedrockAgentCoreClient", Depends(get_harness)],
-) -> Iterable["InvokeHarnessStreamOutputTypeDef"]:
+    http: Annotated[httpx2.Client, Depends(get_http)],
+) -> Iterable[dict[str, Any]]:
     """Open the agent's stream before the response starts, so a refusal can
-    still become a real 503 or 502 (same reason as in D1, docs/learning/D1.md)."""
+    still become a real 401, 503 or 502 instead of a broken stream."""
+    req = http.build_request(
+        "POST",
+        agent_url(settings),
+        headers={
+            "Authorization": f"Bearer {user.token}",
+            "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
+        },
+        json={"message": request.message},
+    )
     try:
-        # https://docs.aws.amazon.com/boto3/latest/reference/services/bedrock-agentcore/client/invoke_harness.html
-        response = client.invoke_harness(
-            harnessArn=settings.harness_arn,
-            runtimeSessionId=session_id,
-            # Memory is stored per actor and session, so one user can never load
-            # another user's conversation by guessing a session id. The id comes
-            # from the verified token, never from anything the page could type.
-            actorId=user.id,
-            runtimeUserId=user.id,
-            messages=[{"role": "user", "content": [{"text": request.message}]}],
-        )
-    except (ClientError, BotoCoreError) as err:
-        raise upstream_error(err, "The assistant") from err
-    return response["stream"]
+        response = http.send(req, stream=True)
+    except httpx2.HTTPError as err:
+        logger.warning("agent unreachable error=%s", type(err).__name__)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "The assistant failed.") from err
+    if response.status_code != 200:
+        response.close()
+        logger.warning("agent refused status=%s", response.status_code)
+        if response.status_code == 401:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Sign in to continue.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if response.status_code in (429, 503):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "The assistant is busy. Try again in a few seconds.",
+                headers={"Retry-After": "5"},
+            )
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "The assistant failed.")
+    return read_events(response)
 
 
-def parse_json(raw: str) -> Any:
+def read_events(response: httpx2.Response) -> Iterator[dict[str, Any]]:
+    """The agent's JSON events, one per SSE `data:` line, until the stream ends.
+
+    Runtime frames what the agent yields as SSE. The agent yields JSON text, and
+    Runtime JSON-encodes that text once more, hence the double decode.
+    """
     try:
-        return json.loads(raw)
-    except ValueError:
-        return raw
+        for line in response.iter_lines():
+            if not line.startswith("data:"):
+                continue  # blank separators, keep-alive comments
+            payload = json.loads(line[len("data:") :].strip())
+            yield json.loads(payload) if isinstance(payload, str) else payload
+    finally:
+        response.close()
 
 
 def to_sources(raw: str) -> list[dict[str, Any]]:
@@ -118,74 +154,49 @@ def to_sources(raw: str) -> list[dict[str, Any]]:
         return []
 
 
-def relay(events: Iterable["InvokeHarnessStreamOutputTypeDef"]) -> Iterator[ServerSentEvent]:
-    """Translate the harness's raw events into our small SSE vocabulary.
-
-    The harness streams every step of its loop (docs/learning/ai.md 6.1): the
-    model's reasoning, a tool call, the tool's result, then the answer. Each
-    content block arrives as start, several deltas, stop, so a tool call's input
-    and a tool's result are collected until their block stops.
-    """
-    tool: dict[str, str] | None = None  # the tool call being streamed
-    result: list[str] | None = None  # pieces of the tool result being streamed
-    usage = {"input_tokens": 0, "output_tokens": 0, "model_calls": 0}
-
+def relay(events: Iterable[dict[str, Any]]) -> Iterator[ServerSentEvent]:
+    """Translate the agent's events into our small SSE vocabulary."""
     for event in events:
-        if "contentBlockStart" in event:
-            start = event["contentBlockStart"]["start"]
-            if "toolUse" in start:
-                tool = {"name": start["toolUse"]["name"], "input": ""}
-            elif "toolResult" in start:
-                result = []
-        elif "contentBlockDelta" in event:
-            delta = event["contentBlockDelta"]["delta"]
-            if "text" in delta:
+        kind = event.get("type")
+        if kind == "text":
+            if event.get("text"):
                 # JSON-encoded on the wire, so a newline in the text cannot break SSE framing.
-                yield ServerSentEvent(event="delta", data=delta["text"])
-            elif "toolUse" in delta and tool is not None:
-                tool["input"] += delta["toolUse"]["input"]
-            elif "toolResult" in delta and result is not None:
-                result.extend(part.get("text", "") for part in delta["toolResult"])
-            # reasoningContent is the model thinking out loud. Not shown to the user.
-        elif "contentBlockStop" in event:
-            if tool is not None:
-                yield ServerSentEvent(
-                    event="tool", data={"name": tool["name"], "input": parse_json(tool["input"])}
-                )
-                tool = None
-            if result is not None:
-                # ponytail: each search sends its own list, numbered from 1.
-                # Two searches in one answer means two lists; the UI shows the latest.
-                sources = to_sources("".join(result))
-                if sources:
-                    yield ServerSentEvent(event="sources", data=sources)
-                result = None
-        elif "metadata" in event:
-            # One metadata event per model call; an answer with one search takes two calls.
-            counts = event["metadata"]["usage"]
-            usage["input_tokens"] += counts["inputTokens"]
-            usage["output_tokens"] += counts["outputTokens"]
-            usage["model_calls"] += 1
-        else:
-            failure = next((name for name in _ERROR_EVENTS if name in event), None)
-            if failure is not None:
-                logger.warning("assistant failed mid-answer event=%s", failure)
-                yield ServerSentEvent(
-                    event="error", data={"message": "The assistant stopped unexpectedly."}
-                )
-                return
-
-    yield ServerSentEvent(event="usage", data=usage)
+                yield ServerSentEvent(event="delta", data=event["text"])
+        elif kind == "tool":
+            yield ServerSentEvent(
+                event="tool", data={"name": event["name"], "input": event["input"]}
+            )
+        elif kind == "tool_result":
+            # ponytail: each search sends its own list, numbered from 1.
+            # Two searches in one answer means two lists; the UI shows the latest.
+            sources = to_sources(event.get("text", ""))
+            if sources:
+                yield ServerSentEvent(event="sources", data=sources)
+        elif kind == "usage":
+            yield ServerSentEvent(
+                event="usage",
+                data={
+                    "input_tokens": event["input_tokens"],
+                    "output_tokens": event["output_tokens"],
+                    "model_calls": event["model_calls"],
+                },
+            )
+        elif kind == "error":
+            logger.warning("assistant failed mid-answer message=%s", event.get("message"))
+            yield ServerSentEvent(
+                event="error", data={"message": "The assistant stopped unexpectedly."}
+            )
+            return
 
 
 @router.post("/v1/chat", response_class=EventSourceResponse)
 def chat(
     user_id: Annotated[str, Depends(get_user_id)],
     session_id: Annotated[str, Depends(session_id_for)],
-    events: Annotated[Iterable["InvokeHarnessStreamOutputTypeDef"], Depends(harness_stream)],
+    events: Annotated[Iterable[dict[str, Any]], Depends(agent_events)],
 ) -> Iterator[ServerSentEvent]:
-    # Plain `def`: boto3 blocks while waiting for the next event, so FastAPI runs
-    # this generator in a worker thread and the server stays free.
+    # Plain `def`: the HTTP client blocks while waiting for the next line, so
+    # FastAPI runs this generator in a worker thread and the server stays free.
     # https://fastapi.tiangolo.com/tutorial/server-sent-events/
     yield ServerSentEvent(event="session", data={"session_id": session_id})
     try:
@@ -196,7 +207,7 @@ def chat(
             if sse.event == "usage":
                 # One line per answer: who, how many tokens. Never the text.
                 logger.info("chat completed user=%s usage=%s", user_id, sse.data)
-    except (ClientError, BotoCoreError) as err:
+    except (httpx2.HTTPError, ValueError) as err:
         # The 200 is already sent, so the failure can only be reported inside the stream.
         logger.warning("assistant stream broke user=%s error=%s", user_id, type(err).__name__)
         yield ServerSentEvent(

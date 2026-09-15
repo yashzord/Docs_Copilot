@@ -1,9 +1,11 @@
 """Small helpers shared by the test files."""
 
+import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx2
 from botocore.exceptions import ClientError
 
 
@@ -28,16 +30,14 @@ def parse_sse(body: str) -> list[tuple[str, str]]:
 
 
 class FakeAgentCore:
-    """Stands in for the bedrock-agentcore client: records calls, returns canned answers.
+    """Stands in for the bedrock-agentcore client (Memory reads).
 
-    botocore's Stubber cannot fake an event stream (it rejects a plain list), so
-    tests inject this object through FastAPI's dependency overrides instead.
+    Records calls, returns canned answers. Injected through FastAPI's dependency overrides.
     https://fastapi.tiangolo.com/advanced/testing-dependencies/
     """
 
     def __init__(
         self,
-        stream: Iterable[dict[str, Any]] = (),
         sessions: Iterable[dict[str, Any]] = (),
         event_pages: Iterable[list[dict[str, Any]]] = (
             [{"eventId": "e0", "eventTimestamp": datetime(2026, 9, 11, tzinfo=UTC), "payload": []}],
@@ -45,7 +45,6 @@ class FakeAgentCore:
         error: ClientError | None = None,
         empty_sessions: Iterable[str] = (),
     ) -> None:
-        self.stream = stream
         self.sessions = list(sessions)
         self.event_pages = list(event_pages)
         # Conversations whose events were deleted: list_events returns nothing for them.
@@ -57,10 +56,6 @@ class FakeAgentCore:
         self.calls.append((name, kwargs))
         if self.error is not None:
             raise self.error
-
-    def invoke_harness(self, **kwargs: Any) -> dict[str, Any]:
-        self._record("invoke_harness", kwargs)
-        return {"stream": self.stream}
 
     def list_sessions(self, **kwargs: Any) -> dict[str, Any]:
         self._record("list_sessions", kwargs)
@@ -75,3 +70,30 @@ class FakeAgentCore:
         if page + 1 < len(self.event_pages):
             response["nextToken"] = str(page + 1)
         return response
+
+
+def sse_body(events: Iterable[dict[str, Any]]) -> bytes:
+    """What Runtime sends for an agent that yielded these JSON events: one SSE line each,
+    the JSON text encoded once more as a JSON string (that is what Runtime does)."""
+    return "".join(f"data: {json.dumps(json.dumps(e))}\n\n" for e in events).encode()
+
+
+class FakeRuntime:
+    """Stands in for AgentCore Runtime behind an httpx2 client: records the request,
+    answers with a canned status and body. Injected as the chat route's HTTP client."""
+
+    def __init__(
+        self, events: Iterable[dict[str, Any]] = (), status: int = 200, body: bytes | None = None
+    ) -> None:
+        self.body = sse_body(events) if body is None else body
+        self.status = status
+        self.requests: list[httpx2.Request] = []
+
+    def client(self) -> httpx2.Client:
+        def handle(request: httpx2.Request) -> httpx2.Response:
+            self.requests.append(request)
+            return httpx2.Response(
+                self.status, content=self.body, headers={"content-type": "text/event-stream"}
+            )
+
+        return httpx2.Client(transport=httpx2.MockTransport(handle))

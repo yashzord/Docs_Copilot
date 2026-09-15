@@ -127,7 +127,7 @@ def upload(
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Files must be 50 MB or smaller.")
 
     key = user_prefix(user_id) + name
-    label = {"metadataAttributes": {"user_id": user_id}}
+    label = {"metadataAttributes": {user_id: "owner"}}
     try:
         # The label goes first. If the second write fails, what is left is a label
         # with no file (harmless), never a file with no user.

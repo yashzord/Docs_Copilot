@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.agentcore.aws.dev/v1/agentcore.json",
+  "name": "docscopilot",
+  "version": 1,
+  "managedBy": "CDK",
+  "tags": {
+    "agentcore:created-by": "agentcore-cli",
+    "agentcore:project-name": "docscopilot"
+  },
+  "runtimes": [
+    {
+      "name": "docscopilotagent",
+      "build": "CodeZip",
+      "entrypoint": "main.py",
+      "codeLocation": "src/",
+      "runtimeVersion": "PYTHON_3_14",
+      "networkMode": "PUBLIC",
+      "protocol": "HTTP",
+      "requestHeaderAllowlist": [
+        "Authorization"
+      ],
+      "authorizerType": "CUSTOM_JWT",
+      "authorizerConfiguration": {
+        "customJwtAuthorizer": {
+          "discoveryUrl": "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_kMn6l3sGV/.well-known/openid-configuration",
+          "allowedClients": [
+            "pnij50p1g7e237mffctm84v9v"
+          ]
+        }
+      },
+      "environmentVariables": {
+        "GATEWAY_URL": "https://docs-copilot-gw-jwt-mkbslle0rs.gateway.bedrock-agentcore.us-west-2.amazonaws.com/mcp",
+        "MEMORY_ID": "docs_copilot_assistant-6aIbceHbw1"
+      }
+    }
+  ],
+  "memories": [],
+  "knowledgeBases": [],
+  "credentials": [],
+  "evaluators": [],
+  "onlineEvalConfigs": [],
+  "agentCoreGateways": [],
+  "policyEngines": [],
+  "configBundles": [],
+  "abTests": [],
+  "harnesses": [],
+  "datasets": [],
+  "capacityProviders": [],
+  "payments": []
+}

@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     graph_kb_id: str
     graph_data_source_id: str
 
-    # The agent (AgentCore Harness) and the memory that keeps its conversations.
-    harness_arn: str
+    # The agent (our Strands agent on AgentCore Runtime, agent/src/main.py) and the
+    # memory that keeps its conversations.
+    agent_runtime_arn: str
     memory_id: str
 
     # Login: the Cognito user pool that signs users in, and the app client the

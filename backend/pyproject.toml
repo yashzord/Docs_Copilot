@@ -17,6 +17,7 @@ dependencies = [
   "pydantic-settings>=2.15.0",
   "python-multipart>=0.0.32",
   "pyjwt[crypto]>=2.14.0",
+  "httpx2>=2.12.0",
 ]
 
 # PEP 735 dependency groups. "dev" is installed by `uv sync`, skipped by `uv sync --no-dev`.

@@ -1,0 +1,17 @@
+{
+  "targets": {
+    "default": {
+      "resources": {
+        "runtimes": {
+          "docscopilotagent": {
+            "runtimeId": "docscopilot_docscopilotagent-zvW96BDxn1",
+            "runtimeArn": "arn:aws:bedrock-agentcore:us-west-2:901708383582:runtime/docscopilot_docscopilotagent-zvW96BDxn1",
+            "roleArn": "arn:aws:iam::901708383582:role/AgentCore-docscopilot-def-ApplicationAgentDocscopil-7u9s6k5SgkzC"
+          }
+        },
+        "stackName": "AgentCore-docscopilot-default",
+        "deployHash": "1b908eca7f34475f"
+      }
+    }
+  }
+}

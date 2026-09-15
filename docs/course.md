@@ -2178,7 +2178,7 @@ Our seven rules:
 
 | Rule | In short |
 |---|---|
-| 1 | a URL, a public website, or something recent: use the browser. Read the whole page. Get past cookie banners. If you still cannot read it, say so and do not cite it |
+| 1 | a URL, a public website, or something recent: use the browser. With a URL, read the whole page. Without one, search on DuckDuckGo's plain results page first, then open the best result. Never Google. Get past cookie banners. If you still cannot read it, say so and do not cite it. Own words, never pasted page text |
 | 2 | anything that could be in the documents: search them first. "How does X relate to Y" across documents: search the graph instead |
 | 3 | cite as `[1]`, `[2]`, exactly that format, never a bare number. Never invent passages |
 | 4 | if nothing covers it: say so, then general knowledge, labeled as such |
@@ -2372,8 +2372,13 @@ a model that handles one simple tool can still fail a multi-step tool.
 
 **Its limits**, from your test: a page that loads its content with
 scripts may give it nothing readable, and it said so (rule 1). Google
-blocks automated browsers with a CAPTCHA, so "search the web for X"
-without a URL is unreliable. It has a browser, not a search engine.
+blocks automated browsers with a CAPTCHA, so rule 1 sends a search to
+DuckDuckGo's plain HTML results page instead, and the agent then opens
+the best result. Tested 2026-09-15 on both versions: "current version of
+uv" found the releases page in 6 model calls and answered correctly;
+"latest Strands version" found the package page and then misread an old
+number from it. Search now works; reading is still the model's job, so a
+"recent" fact deserves a second look.
 
 **In our project**
 

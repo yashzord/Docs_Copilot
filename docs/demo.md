@@ -2,7 +2,9 @@
 
 About 10 minutes on stage, plus about 45 minutes of preparation. What to
 run, what to click, what to say, what to point at, and what to do if a step
-is slow. Written for the demo on 2026-09-12; checked again on 2026-09-15.
+is slow. Written for a business audience: every step says the plain point
+first, then one short line on how it works, for anyone who wants the
+technical proof. Written for the demo on 2026-09-12; checked again on 2026-09-15.
 
 Everything in the demo is about one document: the **Secure Transfers User
 Guide** (`~/Downloads/Secure-Transfers-User-Guide.pdf`), a real 246-page
@@ -38,171 +40,218 @@ watch, while the questions are answered from the copy already indexed.
 
 ---
 
-## Know what you built, on one page
+## Your story, on one page
 
-Read this before the demo until you can say it without looking. Every
-line has a lesson number in `docs/course/` for the full story.
+Read this before the demo until you can say it without looking. The plain
+words come first; the real names are there for when someone asks. Lesson
+numbers point to `docs/course/`.
 
-**The one sentence.** "Docs Copilot: upload documents, ask questions, get
-answers with the exact sources, from one AI agent that AWS runs for us and
-that can also read live web pages."
+**The problem.** "Every team has long documents nobody wants to search:
+manuals, policies, contracts. When someone needs one answer, they scroll,
+search, or interrupt a colleague."
 
-**The pieces, and who made each one**
+**What we built.** "Docs Copilot. You upload your documents, ask a question
+in plain English, and get an answer in seconds, with a link to the exact
+passage it came from. It can also read a web page for you, and connect facts
+spread across a long manual."
 
-| Piece | What it is, in plain words | Ours or AWS | Lesson |
+**Why a business should care**
+
+| They care about | What you say | Behind it, if asked | Lesson |
 |---|---|---|---|
-| the page | the chat window in the browser (Next.js). It sends your one message and draws the answer as it streams in | ours, `frontend/` | 7 |
-| the proxy | a tiny door inside the page's server that forwards `/api/...` to the backend, so the browser never talks to AWS | ours, `frontend/app/api` | 7 |
-| the backend | the Python server (FastAPI) on port 8001: checks each request, uploads files, calls the agent, streams the answer back | ours, `backend/app` | 5, 6 |
-| S3 | the bucket where every uploaded file and its label live | AWS | 10 |
-| the Knowledge Base | AWS's managed search over the files: it chunks, embeds and indexes each file, and answers "find me the passages about X" | AWS | 13, 14 |
-| the graph Knowledge Base + Neptune | a second index that also extracts things and how they relate, for "how does X relate to Y" questions. Bills by the hour: started 45 minutes before, stopped after | AWS | 15 |
-| the Gateway | the agent's tool menu (an MCP server): the Knowledge Base and the Lambda become two tools, `docs___Retrieve` and `graph___search_graph` | AWS | 18 |
-| the Lambda | 40 lines of ours that AWS runs on demand: it searches the graph Knowledge Base for the Gateway | ours, `infra/lambda` | 18 |
-| the Harness | the agent: a loop AWS runs in its own small machine. Model, rules, tools and memory are settings, not code | AWS | 17 |
-| the model | Mistral Large 3, called through Bedrock. The only part that "thinks" | AWS | 11 |
-| Memory | every chat's messages, plus facts and preferences extracted from them, kept per user | AWS | 20 |
-| the browser tool | a real Chrome in a sandbox that the agent drives to read a web page | AWS | 21 |
+| Time | "An answer in seconds instead of minutes of scrolling." | the search itself takes about a second; most of the wait is the AI writing | 13 |
+| Trust | "Every answer shows its source. You can check it in one click." | the answer is written only from the passages the search found, each numbered as a source | 13 |
+| Cost | "About one cent per question." | pay-per-use AWS services; only the knowledge graph bills by the hour | 24 |
+| Safety | "Your documents stay in your own private AWS storage, and the assistant says when something is not in them." | a private S3 bucket, a written rule in the prompt, and AWS roles that each allow one job | 9, 19 |
 
-**One question, in eight steps** (lesson 23 has the twelve-step version):
+**How it works, in one breath.** "You ask a question. An AI assistant first
+decides where to look: your documents, the connections inside them, or the
+web. It finds the best passages, writes the answer from them, and shows you
+where each part came from. It remembers the conversation, like a colleague
+would."
 
-1. You type a question. The page sends only that line and a chat id to the backend.
-2. The backend checks it (bad requests are refused before anything costs money) and calls the Harness.
-3. The Harness loads the chat so far from Memory and asks the model: "here are the rules, the question, and your tools. What do you want to do?"
-4. The model answers with a tool call: "search the documents for MFA steps".
-5. The Harness calls the Gateway, which asks the Knowledge Base, which returns the five best passages with their source file.
-6. The Harness asks the model again: "here is the question and the passages. Answer, and cite them as [1], [2]."
-7. The answer streams back through the backend and the proxy to the page, word by word, with the tool line above it and the source cards under it.
-8. The Harness saves the turn to Memory. Minutes later, background jobs extract facts and preferences from it.
+**The parts, in plain words, with their real names**
 
-That is "2 model calls" under every answer: one to decide, one to write.
+| In plain words | Real name | Ours or AWS | Lesson |
+|---|---|---|---|
+| the chat page | a Next.js page with a small proxy that forwards to our server | ours, `frontend/` | 7 |
+| the server that checks and forwards | the FastAPI backend on port 8001 | ours, `backend/app` | 5, 6 |
+| the private file cabinet | an S3 bucket | AWS | 10 |
+| the search that finds passages | a Bedrock Knowledge Base: meaning search plus exact-word search, then reranking | AWS | 13, 14 |
+| the map of how things connect | a GraphRAG Knowledge Base on Neptune, billed by the hour | AWS | 15 |
+| the assistant that decides and writes | the AgentCore Harness, running the Mistral Large 3 model | AWS | 11, 17 |
+| the toolbox it reaches into | the AgentCore Gateway (an MCP server) and one small Lambda function of ours | AWS and ours | 18 |
+| its memory | AgentCore Memory | AWS | 20 |
+| its web reader | AgentCore Browser, a real Chrome in a sandbox | AWS | 21 |
 
-**Words you will say, and what they mean**
+**One question, step by step** (lesson 23 has the twelve-step version):
 
-- **Agent:** a model in a loop with tools. The model never runs anything; it asks, the loop runs the tool and comes back.
-- **Tool:** a function the agent may ask for: the document search, the graph search, the browser.
-- **RAG:** find the relevant passages first, then hand them to the model with the question, so it answers from your documents instead of guessing.
-- **Chunk, embedding, vector search:** documents are cut into paragraphs; each paragraph becomes a list of numbers that captures its meaning; a search finds the paragraphs whose numbers are closest to the question's.
-- **Hybrid search and reranking:** meaning-search plus exact-word search, merged, then a careful second model re-sorts the top results.
-- **MCP:** the standard plug between an agent and its tools. The Gateway speaks it.
-- **Streaming:** the answer arrives in pieces, so the first word shows almost at once.
-- **Identity:** every call to AWS is made by some identity that needs permission for exactly that call. The backend acts as your IAM user, the Harness as its role, the Gateway as its role.
+1. You type a question. The page sends just that question to our server (the FastAPI backend).
+2. The server checks the request, so a bad one is refused before it costs anything, and passes it to the assistant (the AgentCore Harness).
+3. The assistant reloads the conversation so far (AgentCore Memory) and asks the AI: "here are your rules, the question and your tools; what should we do?" (Mistral Large 3).
+4. The AI decides: "search the documents for MFA steps".
+5. The toolbox runs that search (the Gateway calls the Knowledge Base) and brings back the five best passages, each with its source file.
+6. The AI writes the answer from those passages only, numbering each source [1], [2].
+7. The answer appears word by word (streaming), with a line saying where it looked and a card for each source.
+8. The conversation is saved. Later, background jobs note lasting preferences you stated, like "keep answers short".
+
+That is why each answer shows "2 model calls": one to decide where to look,
+one to write.
+
+**Words you may use, plain meaning first**
+
+- **AI assistant (agent):** an AI that can use tools, not just talk. It decides, a tool runs, it reads the result, and decides again.
+- **Searching your documents first (RAG):** find the relevant passages, then give them to the AI with the question, so it answers from your documents instead of guessing.
+- **Sources (citations):** the numbered markers and cards that show where each part of the answer came from.
+- **Toolbox (MCP, the Gateway):** one standard plug between the assistant and its tools, so a new tool is configuration, not a rebuild.
+- **Word by word (streaming):** the answer arrives as it is written, so you see the start almost at once.
+- **Permissions (identity):** every part of the system can do exactly its one job and nothing else.
 
 **Numbers worth knowing**
 
-- A document question: about 1 cent, 2 model calls, 10 to 15 thousand tokens in.
-- A web page: 2 to 8 cents, 3 or 4 model calls, the whole page's text goes into the model.
-- The graph: $0.48 an hour running, about 5 cents an hour stopped. Everything else bills per use.
-- Code we wrote: about 1,600 lines on main, plus 51 tests. The login branch adds about 600 lines and 22 tests. The rest is AWS services we configured.
+- A document question: about 1 cent, answered in seconds (2 model calls, 10 to 15 thousand tokens read).
+- Reading a web page: 2 to 8 cents, because the AI reads the whole page (3 or 4 model calls).
+- The connections map (the graph): $0.48 an hour while running, about 5 cents an hour stopped. Everything else is pay per use.
+- What we built ourselves: about 1,600 lines of code on main, with 51 automated tests. The rest is AWS services we configured. The login branch adds about 600 lines and 22 tests.
 
-**Questions people ask, with the honest answer**
+**Questions business people ask, with the honest answer**
 
-- *Why not just ask ChatGPT?* It has never seen your documents. This answers from them and shows you the exact passage.
-- *Can it be wrong?* Yes. The citation is not proof, it is a pointer. Open the source card and check. Lesson 13 names the two failures: the search missed, or the model wrote something the passage does not say.
-- *Why AWS managed services instead of building it?* Chunking, embeddings, hybrid search, reranking, memory, the agent loop, the browser: each would be weeks to build well. Configuring them took days and cost cents. Lesson 25 lists what we dropped.
-- *Why this model?* Two others were tried: one could not use tools while streaming, one could not drive the browser. Mistral Large 3 did both.
-- *Is it secure? Who can see my documents?* On this version, one user, on purpose, and the bucket is private. The other branch adds a real login and makes every document search private per person, enforced by a policy the model cannot argue with.
-- *What would you do next?* The login branch is built and tested. Then tracing of every step, guardrails on the model, and an evaluation set so changes are measured instead of eyeballed.
-- *What broke along the way?* Plenty: lesson 25 has the table. The demo is the version that survived.
+- *Why not just use ChatGPT?* "A public chat tool answers from what it learned on the internet, and cannot show you the passage an answer came from. This answers from your documents and points to the exact passage." If they push: the documents stay in your own AWS account, and every answer is tied to a search index you control.
+- *Can it be wrong?* "Yes, like any assistant. That is why every answer shows its source, one click to check. And when the documents do not cover a question, it says so." If they push: two ways it fails, the search missed the passage or the AI misread it (lesson 13); measuring that with a set of test questions is the next step (lesson 29).
+- *Is our data safe?* "The documents sit in private storage in our own AWS account, and each part of the system can do only its one job. This version is for one user. A second version adds sign-in, so each person can search only their own documents." If they push: AWS roles with one permission set each; the login branch uses Cognito sign-in and a policy check on every document search (Part H).
+- *What does it cost?* "About a cent a question. Most parts cost nothing when nobody is using them." If they push: only the graph bills by the hour, so it is stopped when idle (lesson 24).
+- *Why not build it all ourselves?* "The hard parts, the search, the memory, the assistant loop and a safe web browser, are services AWS already runs. We connected them and wrote the glue." If they push: lesson 25 lists what we tried and dropped.
+- *Why this AI model?* "We tested three. Only one could both use its tools while answering live and read web pages reliably." If they push: Llama 4 could not use tools while streaming, and gpt-oss could not drive the browser; Mistral Large 3 did both (lesson 11).
+- *What would it take to use this for a team?* "Three things: sign-in so each person has private documents, which is already built on a branch; running it on a server instead of a laptop; and a set of test questions to measure accuracy before and after every change."
+- *What broke along the way?* "Plenty, and each failure shaped a decision." If they push: lesson 25 has the table.
 
 ---
 
 ## The flow
 
-### 1. The idea (1 minute, on the map)
+### 1. The problem and the promise (1 minute, on the map)
 
-Say: "Upload documents, ask questions, get answers with the exact sources.
-Behind it is one AI agent that AWS runs for us. For each question it picks a
-tool: a document search, a knowledge graph, or a live web browser."
+Say: "Every team has long documents nobody wants to search. Picture a new
+support person who needs one answer from a 246-page product manual. Today
+that means minutes of scrolling. Docs Copilot gives the answer in seconds,
+and shows exactly where it came from."
+
+Then: "Behind it is one AI assistant that AWS runs for us. For every
+question it decides where to look: the documents, the connections inside
+them, or the web."
 
 Point at: the four columns on the map, left to right: your laptop, the
-agent, the tools, the data. Solid boxes are code we wrote; dashed boxes are
-set up in AWS, with no code.
+assistant, its tools, the data. Solid boxes are code we wrote; dashed boxes
+are AWS services we set up.
 
-### 2. Upload the guide (1 minute)
+### 2. Add the manual (1 minute)
 
 Click **Upload a file**, choose `Secure-Transfers-User-Guide.pdf`.
 
-Say: "The file goes to S3 with a small label next to it. Then two things
-read it. The Knowledge Base cuts it into chunks, turns each chunk into a list
-of numbers that captures its meaning, and indexes them. The graph Knowledge
-Base also has an AI model pull out the things the manual names, like
-projects, folders and roles, and how they connect."
+Say: "I add the manual once. The system reads all of it, so later it can
+find the right page in about a second."
+
+Behind it: "It is stored privately, cut into short passages, and indexed by
+meaning and by exact words. A second index also records how things in the
+manual connect, like projects, folders and roles."
 
 Point at: the status line, "Indexing...". Do not wait for it: go on to step
 3 while it runs. (If asked: the questions use the copy indexed before the
 talk; this upload refreshes it.)
 
-### 3. A document question (1 minute)
+### 3. Ask the manual a question (1 minute)
 
 Ask: **"What are the steps to enable MFA for a user?"**
 
-Point at:
-- the line above the answer: "Searched your documents for ..."
-- the numbered markers in the answer; open source card 1: the exact excerpt from the guide it came from
-- the line under the answer: two model calls, one to decide which tool to use, one to write the answer
+Say while it answers: "A plain question, the way a new employee would ask it."
 
-Say: "A 246-page manual. The search itself takes about a second; most of the
-wait is the model writing."
+Point at, in this order:
+- the numbered markers in the answer; open source card 1. Say: "This is the exact passage it used. You never have to take its word for it." Pause here: this is the moment that earns trust.
+- the line above the answer, "Searched your documents for ...". Say: "It decided on its own to search the manual."
+- the line under the answer, "2 model calls". Say: "One to decide where to look, one to write the answer. About one cent."
 
-### 4. A follow-up in the same chat (30 seconds)
+### 4. A follow-up (30 seconds)
 
 Ask: **"Give me that in two bullet points."**
 
-Say: "The page sent only this one line. The agent remembers the conversation
-itself, in AgentCore Memory."
+Say: "I did not repeat the question. It remembers the conversation, like a
+colleague would."
 
-### 5. A relationship question: the graph (1 minute)
+Behind it: "The page sends only the new line; the assistant reloads the
+conversation from its memory service, AgentCore Memory."
+
+### 5. How things fit together (1 minute)
 
 Ask: **"How do projects, folders and user roles relate to each other in SecureTransfers?"**
 
+Say: "A harder kind of question: not 'find the page', but 'how do these
+pieces connect'. The answer is spread across the whole manual."
+
 Point at: the line above the answer, "Searched the knowledge graph for ...".
-Say: "A different tool. The graph search starts from the closest passages,
-then follows connections to other passages that mention the same things."
+Say: "So it picked a different tool: a map of how the things in the manual
+connect to each other."
 
-If it used the document search instead: say that the agent chooses the tool
-from each tool's description, and move on.
+If it used the document search instead: say "It chooses the tool itself,
+from a short description of each one; here it judged the normal search was
+enough," and move on.
 
-### 6. A question the guide cannot answer (30 seconds)
+### 6. Something the manual does not cover (30 seconds)
 
 Ask: **"What is the capital of France?"**
 
 Point at: the answer says the documents do not cover it, then answers from
-general knowledge and says so. Say: "It never passes off general knowledge
-as coming from your documents. That is one of its rules."
+general knowledge and says so.
 
-### 7. A live web page (1 minute)
+Say: "It never passes off general knowledge as coming from your documents.
+That is one of its written rules, and it is what makes the sources worth
+trusting."
+
+### 7. Read a web page for me (1 minute)
 
 Ask: **"What does https://aws.amazon.com/bedrock/agentcore/ say AgentCore is? Two sentences."**
 
-Point at: "Opened https://...". Say: "A real browser that AWS runs in a
-sandbox. The agent drives it step by step." Takes 30 to 60 seconds.
+Point at: "Opened https://...". Say: "It can also read a live web page and
+summarize it."
 
-If it says it could not read the page: that is the honest-answer rule
-working; say so.
+Behind it: "AWS runs a real browser for it in a locked-down sandbox, so it
+never touches this laptop. Without a link, for recent things, it searches
+the web itself."
+
+It takes 30 to 60 seconds. Fill the wait with: "It is actually opening the
+page and reading it, step by step."
+
+If it says it could not read the page: say "That is the honesty rule again:
+it tells you instead of guessing."
 
 By now the upload from step 2 has likely finished: point at "Ready to ask"
 in the sidebar.
 
-### 8. Under the hood (2 to 3 minutes, on the map)
+### 8. How it works, for the curious (1 to 2 minutes, on the map, optional)
+
+Skip this if the room is not technical and time is short.
+
+Say first: "In one sentence: our code is the chat page and a small server;
+everything smart is AWS services we connected."
 
 Click **Document question** on the map and step through with the arrow keys.
-Stop on three hops:
-- hop 4, "FastAPI starts the agent": our code hands the question to AWS
-- hop 7, "The Harness calls the tool over MCP": one standard plug for every tool
-- hop 10, "FastAPI translates the stream": how the answer arrives piece by piece
+Stop on three hops, plain point first:
+- hop 4, "FastAPI starts the agent": "Our server hands the question to the assistant AWS runs."
+- hop 7, "The Harness calls the tool over MCP": "The assistant reaches its tools through one standard plug, so adding a tool is configuration, not a rebuild."
+- hop 10, "FastAPI translates the stream": "The answer comes back piece by piece, which is why the words appear as it writes."
 
-Then click the **Gateway** box and read its "Acts as" line. Say: "Every call
-is made by some identity, and that identity needs permission for exactly
-that call."
+Then click the **Gateway** box and read its "Acts as" line. Say: "Every
+part has permission for exactly its one job. That is how it stays safe as it
+grows."
 
-### 9. Questions
+### 9. Close, then questions (1 minute)
 
-Good answers to have ready:
-- **Can it answer anything, or only the documents?** It searches your documents first, uses the browser for URLs and recent things, and answers general questions from its own knowledge while saying so. It remembers preferences you tell it across chats.
-- **Cost:** a document question is about 1 cent; a web page 2 to 8 cents; indexing the guide a few cents. The graph is the only part billed by the hour: $0.48 an hour running, about 5 cents stopped.
-- **Why this model:** Llama 4 could not use tools while streaming, and gpt-oss could not drive the browser. Mistral Large 3 did both (lesson 11 in `docs/course/`).
-- **What is ours and what is AWS:** our code is the page, the proxy, the FastAPI backend and one Lambda. The agent, the search, the graph, the memory and the browser are AWS services we set up.
+Say: "So: answers in seconds, with the source every time, for about a cent a
+question, and the documents stay in our own account. The next step is
+sign-in, so each person searches only their own documents, and that is
+already built."
+
+Then take questions: the answers are in "Questions business people ask"
+above.
 
 ---
 

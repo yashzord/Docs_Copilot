@@ -32,7 +32,7 @@ async function forward(request: NextRequest, ctx: RouteContext<"/api/[...path]">
   const target = `${apiUrl}/v1/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
 
   // Only two headers cross to the backend: the signed-in person's token, which
-  // FastAPI verifies (lesson 22), and the content type, which keeps the multipart
+  // FastAPI verifies (lesson 31), and the content type, which keeps the multipart
   // boundary for uploads ("multipart/form-data; boundary=..."). Nothing else from
   // the browser's request is forwarded.
   const headers = new Headers();

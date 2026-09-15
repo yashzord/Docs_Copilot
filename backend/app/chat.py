@@ -6,7 +6,7 @@ the new message and a session id, never the history.
 
 The call to the agent carries the signed-in user's own Cognito token. Runtime
 checks it (its JWT authorizer), and the agent passes it on to the Gateway, so
-every hop knows who is asking (lesson 22). AWS SDKs cannot send a bearer token
+every hop knows who is asking (lesson 33). AWS SDKs cannot send a bearer token
 to Runtime, so this is a plain HTTPS request with a streaming HTTP client.
 
 Wire format, in order:

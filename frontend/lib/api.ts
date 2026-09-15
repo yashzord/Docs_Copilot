@@ -1,7 +1,7 @@
 // fetch() for our API: adds the signed-in person's token, and signs in again on a 401.
 //
 // Every call to /api/... goes through here, so no component has to think about
-// tokens. The proxy forwards the header to FastAPI, which verifies it (lesson 22).
+// tokens. The proxy forwards the header to FastAPI, which verifies it (lesson 31).
 
 import { accessToken, forgetTokens, signIn } from "@/lib/auth";
 

@@ -13,8 +13,8 @@ The second one is how the Knowledge Base learns which user every chunk of the
 file belongs to, so a search can be limited to `user_id`. Listing already uses
 the S3 prefix. Retrieve is not forced to that filter yet: the Harness still
 searches the whole index; `agent/main.py` injects the filter when that agent
-is the chat path, and a Gateway Cedar policy (lesson 28) would make it
-mandatory. The user id is Cognito's `sub` (lesson 22).
+is the chat path, and a Gateway Cedar policy (lesson 34) would make it
+mandatory. The user id is Cognito's `sub` (lesson 31).
 https://docs.aws.amazon.com/bedrock/latest/userguide/s3-data-source-connector.html
 """
 

@@ -9,7 +9,7 @@ hands the routes two things:
     user.token  the raw token, which the chat route forwards to the Harness.
                 The Harness checks it again itself (its inbound JWT authorizer).
 
-What "checks the token" means, in order (docs/course.md lesson 22):
+What "checks the token" means, in order (docs/course/, lesson 31):
     1. signature: signed by one of the user pool's public keys (fetched from
        its JWKS URL, cached by PyJWT)
     2. expiry: `exp` is in the future

@@ -1,4 +1,4 @@
-// Sign-in with Amazon Cognito's managed login page (docs/course.md lesson 22).
+// Sign-in with Amazon Cognito's managed login page (docs/course/, lesson 31).
 //
 // The flow is OAuth 2.0 "authorization code with PKCE", the standard for a page
 // that runs in the browser and has no secret to keep:

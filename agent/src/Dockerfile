@@ -1,6 +1,6 @@
-# The agent's container for AgentCore Runtime (docs/course.md lesson 17).
+# The agent's container for AgentCore Runtime (docs/course/, lesson 32).
 # Built for arm64 by the AgentCore CLI in CodeBuild; run locally with
-# `PORT=8081 uv run python src/main.py` instead (lesson 26).
+# `PORT=8081 uv run python src/main.py` instead (lesson 35).
 FROM python:3.12-slim
 
 WORKDIR /app

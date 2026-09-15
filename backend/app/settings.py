@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     memory_id: str
 
     # Login: the Cognito user pool that signs users in, and the app client the
-    # page uses. Both are public identifiers, not secrets (lesson 22).
+    # page uses. Both are public identifiers, not secrets (lesson 31).
     cognito_user_pool_id: str
     cognito_client_id: str
 

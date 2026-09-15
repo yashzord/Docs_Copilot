@@ -1,4 +1,4 @@
-"""The Docs Copilot agent (docs/course.md lessons 16 and 17).
+"""The Docs Copilot agent (docs/course/, lessons 16 and 32).
 
 A Strands agent that runs on Amazon Bedrock AgentCore Runtime. One request is
 one turn of a conversation:
@@ -10,7 +10,7 @@ What this file does with that request, in order:
     1. Runtime has already checked the token (its JWT authorizer). We only read the
        `sub` claim out of it: the user id, which is the memory actor.
     2. The Gateway is opened with the SAME token, so the Gateway sees the user, not
-       a shared role, and its Cedar policy can check per-user rules (lesson 28).
+       a shared role, and its Cedar policy can check per-user rules (lesson 34).
     3. A hook adds the "only this user's documents" filter to every document
        search before the tool runs. The model never gets to choose that.
     4. AgentCore Memory keeps the conversation and the long-term facts per user.
@@ -73,7 +73,7 @@ class OwnDocumentsOnly(HookProvider):
 
     A document carries a label whose KEY is the id of the user who uploaded it,
     with the value "owner" (backend/app/documents.py). The key, not the value,
-    because the Gateway's Cedar policy (lesson 28) can compare the key with the
+    because the Gateway's Cedar policy (lesson 34) can compare the key with the
     caller's id but sees the value as untyped. Searching with this filter
     returns only that user's chunks, and the Gateway refuses any other key, so
     neither the model nor this code can be talked out of it.

@@ -4,16 +4,16 @@ Upload documents, ask questions, and get streamed answers with citations
 from one AI agent that can also read web pages and connect facts across
 documents. Built step by step as a learning project.
 
-New here? Start with `docs/course.md`: the crash course, 29 lessons from
-zero, in order, with plain words and pictures. The same course as a page
-with a sidebar: link at the top of that file.
+New here? Start with `docs/course/README.md`: the course, one story in
+eight parts and 35 lessons, from zero, in plain words and pictures. Part H
+is the login branch, told as the next chapter.
 
 ---
 
 ### Branches
 
 - `main`: the working version described in this README. Single user, the AgentCore Harness answers.
-- `feat/login-runtime-agent`: in progress. Cognito login, documents private per user, and a Strands agent on AgentCore Runtime replacing the Harness. Its own README and docs/course.md describe that version.
+- `feat/login-runtime-agent`: in progress. Cognito login, document search private per user, and a Strands agent on AgentCore Runtime replacing the Harness. Its own README describes that version, and the course tells it as Part H.
 
 ## 1. What I'm building
 
@@ -89,7 +89,7 @@ not just how to switch them on.
 - Buy the plumbing, build the glue: AWS managed services for retrieval, the graph, the agent loop and memory; our own code for the API, the UI and one small Lambda.
 - About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour) is stopped when idle and deleted after the demo.
 - Models are config, not code: switching one is a single line.
-- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course.md`.
+- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course/`.
 
 ### The big picture
 
@@ -145,7 +145,7 @@ backend/             one Python project: pyproject.toml, uv.lock, .env
 infra/
   iam/               IAM policies, kept as documentation                D2
   lambda/graph_search/  the graph search Lambda + its tool schema       D4
-docs/                course.md (the crash course) and demo.md (the demo script)
+docs/                course/ (the course, one file per part) and demo.md (the demo script)
 ```
 
 New backend code starts inside `backend/app`. Code that AWS runs for us (the
@@ -218,12 +218,13 @@ Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 ## 7. Learning docs
 
-One file: `docs/course.md`, the crash course. Twenty-nine lessons in seven
-parts, written for someone new to coding: the terminal and git, the web
-part, AWS from zero, AI from zero, the agent, putting it together, and running it like production, then
-a glossary. Every lesson has the same shape: the idea, a picture, where it
-lives in this project, one thing to try on your own data, and questions to
-check yourself. What was tried and dropped is lesson 25.
+`docs/course/`: the course, one story told in order. One file per part
+(A to H) plus a story map (`README.md`) and a glossary. Every lesson first
+teaches the whole topic, every common way people solve it, then shows where
+this project sits: the idea, a picture, the whole field, our choice and why,
+where it lives in the code or AWS, and questions to check yourself. Parts A
+to G tell the main version. Part H tells the login branch as the next
+chapter. What was tried and dropped is lesson 25.
 
-The same course is published as a page with a sidebar (link at the top of
-the file), next to the interactive map of the whole system.
+The same course is published as a page with a sidebar (link in
+`docs/course/README.md`), next to the interactive map of the whole system.

@@ -9,8 +9,8 @@
   },
   "runtimes": [
     {
-      "name": "docscopilotagent",
-      "build": "CodeZip",
+      "name": "copilot",
+      "build": "Container",
       "entrypoint": "main.py",
       "codeLocation": "src/",
       "runtimeVersion": "PYTHON_3_14",

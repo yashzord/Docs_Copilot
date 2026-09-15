@@ -103,7 +103,7 @@ Part D  AI from zero
 
 Part E  The agent
   16  What an agent is
-  17  The Harness: the agent AWS runs for us
+  17  The agent on AgentCore Runtime: our loop, hosted by AWS
   18  Tools, MCP, the Gateway, and the Lambda
   19  The prompt: the agent's rules
   20  Memory: short-term and long-term
@@ -157,20 +157,21 @@ Three things to know:
 ```
 you type:   cd ~/Projects/personal/Docs_Copilot        "go to the project folder"
 you type:   ls                                          "what is here?"
-it prints:  README.md  backend  docs  frontend  infra
+it prints:  README.md  agent  backend  docs  frontend  infra
 you type:   ls backend/app                              "what is inside backend/app?"
 it prints:  __init__.py  auth.py  aws.py  chat.py  documents.py  main.py  sessions.py  settings.py
 ```
 
 **In our project**
 
-The project is one folder with four parts:
+The project is one folder with five parts:
 
 ```
 Docs_Copilot/
   README.md      the front page: what this is, how to run it, the decisions
   backend/       the Python server (the "API")
   frontend/      the web page (Next.js)
+  agent/         the agent: 200 lines of Python that AWS hosts for us (lesson 17)
   infra/         things that run on AWS, not on your laptop: one Lambda function, IAM policies
   docs/          this course, and the demo script
 ```
@@ -338,8 +339,10 @@ flowchart LR
     G[git push] --> B[fresh Linux box on GitHub]
     B --> J1[backend job<br/>uv sync, ruff, mypy, pytest]
     B --> J2[frontend job<br/>npm ci, lint, typecheck, test]
+    B --> J3[agent job<br/>uv sync, ruff, pytest]
     J1 --> OK{all pass?}
     J2 --> OK
+    J3 --> OK
     OK -->|yes| Y[green check]
     OK -->|no| N[red cross + logs]
 ```
@@ -352,7 +355,7 @@ backend/uv.lock            the receipt: exact versions
 backend/.python-version    3.12 (the Python version to use)
 frontend/package.json      the JavaScript shopping list, plus the scripts (npm run dev, npm test)
 frontend/package-lock.json its receipt
-.github/workflows/ci.yml   the CI recipe: two jobs, backend and frontend
+.github/workflows/ci.yml   the CI recipe: three jobs, backend, frontend and agent
 ```
 
 Same idea, two names:
@@ -378,13 +381,17 @@ tests can find the `app` folder.
 ```
 cd ~/Projects/personal/Docs_Copilot/backend
 uv run ruff check .        All checks passed!
-uv run mypy .              Success: no issues found in 12 source files
-uv run pytest -q           38 passed
+uv run mypy .              Success: no issues found in 15 source files
+uv run pytest -q           54 passed
 
 cd ../frontend
 npm run lint
 npm run typecheck
-npm test                   13 passed
+npm test                   14 passed
+
+cd ../agent
+uv run ruff check .        All checks passed!
+uv run pytest -q           5 passed
 ```
 
 Then open `backend/tests/test_chat.py` and read the first test. Its name
@@ -850,7 +857,7 @@ your laptop                        AWS (Amazon's data centers)
 
 Everything this project uses on AWS is a **managed service**: AWS runs it,
 you configure it. You never see a server. That is why the whole app is
-about 1,100 lines of code: the heavy parts are configuration.
+about 2,300 lines of code, tests aside: the heavy parts are services.
 
 Three words you need before anything else:
 
@@ -916,7 +923,7 @@ Four words:
 
 - **Root user:** the email and password the account was created with. The owner's master key. Used only for owner tasks (turning on MFA, setting the budget, making the first user), then left alone. If root leaks, someone owns the account.
 - **IAM user:** an identity for a person. Ours is `yashubitra`. Your laptop uses it through an **access key** (a username and password for programs) stored under the profile name `docs-copilot-dev`. IAM means Identity and Access Management: the part of AWS that decides who may do what.
-- **IAM role:** an identity for a service. It has no password. A service "puts it on" to act, and gets short-lived credentials automatically. Every AWS service in our app acts as its own role: the Harness has one, the Gateway has one, each Knowledge Base has one, the Lambda has one.
+- **IAM role:** an identity for a service. It has no password. A service "puts it on" to act, and gets short-lived credentials automatically. Every AWS service in our app acts as its own role: the Runtime our agent runs on has one, the Gateway has one, each Knowledge Base has one, the Lambda has one.
 - **Policy:** a JSON list of allowed actions, attached to a user or a role. AWS **denies everything that no policy allows.**
 
 Think of the account as a building. Root is the owner. Your IAM user is
@@ -955,7 +962,7 @@ Gateway's role, not yours.
 |---|---|---|---|
 | `yashubitra` (profile `docs-copilot-dev`) | IAM user | you | everything (`AdministratorAccess`). The backend calls S3, the Knowledge Base and Memory as this user |
 | the signed-in person | Cognito token, not IAM | Cognito, at sign-in | call the agent, call the Gateway: as *this person*, checked by each (lesson 22) |
-| Runtime role `AgentCore-docscopilot-def-ApplicationAgent...` | role | the AgentCore CLI's deploy | call Bedrock models; read and write our memory; use the browser (`DocsCopilotAgentTools`, added by us) |
+| Runtime role `AgentCore-docscopilot-def-ApplicationAgentCopilotRu-...` | role | the AgentCore CLI's deploy | call Bedrock models; read and write our memory; use the browser (`DocsCopilotAgentTools`, added by us) |
 | Harness role `AmazonBedrockAgentCoreHarnessDefaultServiceRole-yhy2p` | role | the console | the main branch's agent; unused here |
 | Gateway role `AmazonBedrockAgentCoreGatewayDefaultServiceRole1789098437928` | role | the console when the gateway was created | search the managed Knowledge Base; plus two things we added: invoke the graph search Lambda, and ask the policy engine (lesson 28) |
 | Knowledge Base role `..._x6ipa` | role | the console | read the bucket, run its models, write its index |
@@ -1104,7 +1111,7 @@ aws s3 ls s3://docs-copilot-901708383582 --recursive --human-readable --profile 
 
 1. Why is the label written before the file?
 2. What happens if you upload a `.exe`? Is S3 touched?
-3. Why does the app write a tenant label it never filters on?
+3. Why is the label's key the person's id, and who filters on it?
 
 ---
 
@@ -1168,8 +1175,9 @@ flowchart LR
 
 **In our project**
 
-The model is one setting on the Harness (lesson 17), not a line of code.
-Changing it is one dropdown. Model id: `mistral.mistral-large-3-675b-instruct`.
+The model is one line in the agent, `MODEL_ID` in `agent/src/main.py`
+(lesson 17), and an environment variable on the Runtime can override it
+without a redeploy. Model id: `mistral.mistral-large-3-675b-instruct`.
 
 **Try it**
 
@@ -1553,7 +1561,7 @@ score      0.794
 text       "Steps to Configure MFA 1. Select User Navigate to Secure Store tab and use the
             filtering controls to locate the desired user. 2. Open Configuration Click on the
             Edit User button and navigate to MFA tab. ... [X] Settings [ ] Core MFA [X] ..."
-metadata   tenant_id: dev                        <- our label from lesson 10
+metadata   <your sub>: owner                     <- our label from lesson 10
            _document_title: Secure_Transfers_User_Guide_-_Final-1.pdf
            _chunk_id: Z6B52XpIHq7DqTDSpF0LIx643x2UIkaSvGwfBKke4Ao
 ```
@@ -1569,7 +1577,7 @@ source, **Sync history**: every sync with its time and counts.
 1. Name the four steps of a sync.
 2. Why is `ConflictException` from a sync start not an error for us?
 3. Why does the page show "Ready to ask" while the graph is still working?
-4. Where does `tenant_id: dev` in a search result come from?
+4. Where does the `<your sub>: owner` label in a search result come from?
 
 ---
 
@@ -1670,7 +1678,7 @@ A top result on 2026-09-11:
 score      1.542                                      <- graph scores are on a different scale
 text       "It also offers comprehensive monitoring and reporting capabilities to track
             transfer activities and ensure compliance. ..."   (1,814 characters)
-metadata   tenant_id: dev
+metadata   <your sub>: owner
            x-amz-bedrock-kb-document-page-number: 14   <- this one tells you the page
 ```
 
@@ -1744,7 +1752,7 @@ flowchart TD
 
 **Under the hood: the loop, written out**
 
-The Harness hides the loop. Here it is in full, in about 40 lines of
+Strands hides the loop. Here it is in full, in about 40 lines of
 Python against the Bedrock Converse API, with one tool. Read it; run it
 if you like (it needs `boto3` and your profile). Every agent framework is
 this, plus the concerns in the table above.
@@ -1791,12 +1799,13 @@ while True:                                                           # the loop
 What to notice:
 
 - **The model never runs anything.** It returns a `toolUse` block with a name and JSON `input`, and a `stopReason` of `tool_use`. The loop runs the function and sends the result back as a `toolResult` block, tied to the call by `toolUseId`. That contract is Bedrock's [Converse tool use](https://docs.aws.amazon.com/bedrock/latest/userguide/tool-use.html).
-- **The history is a list of messages** that grows every turn: user, assistant (with the tool call), user (with the tool result), assistant (the answer). Short-term memory is this list. The Harness keeps it in AgentCore Memory instead of a Python variable.
+- **The history is a list of messages** that grows every turn: user, assistant (with the tool call), user (with the tool result), assistant (the answer). Short-term memory is this list. Our agent keeps it in AgentCore Memory through its session manager (lesson 20) instead of a Python variable.
 - **The description is prompt.** The model chose `search_docs` because its description said "use it for any factual question". Change the sentence and the choice changes.
-- **What is missing** is the table above: no iteration limit (a confused model could loop forever), no timeout, no truncation when the list outgrows the context window, no handling of a tool that throws, no trace. The Harness adds all of it, plus an isolated machine per session and a role to run as.
+- **What is missing** is the table above: no iteration limit (a confused model could loop forever), no timeout, no truncation when the list outgrows the context window, no handling of a tool that throws, no trace. Strands adds those safeguards; Runtime adds an isolated machine per session and a role to run as.
 
-**The same agent in Strands.** Strands is the open-source framework the
-Harness is built on. The loop above becomes:
+**The same agent in Strands.** Strands is AWS's open-source agent
+framework (the Harness on the main branch is built on it too). The loop
+above becomes:
 
 ```python
 from strands import Agent, tool
@@ -1815,13 +1824,13 @@ agent("How do I enable MFA for a user?")
 
 The docstring is the tool description; the type hints are the input
 schema; the loop, limits and tracing are inside `Agent`. Deploying that
-file to **AgentCore Runtime** (the hosting service the Harness itself runs
-on) is four commands with the AgentCore CLI: `agentcore create`, edit the
+file to **AgentCore Runtime** (AWS's hosting service for agent code) is
+a few commands with the AgentCore CLI: `agentcore create`, edit the
 file, `agentcore deploy`, `agentcore invoke` ([Strands on Runtime](https://strandsagents.com/docs/user-guide/deploy/deploy_to_bedrock_agentcore/)).
-Runtime gives the same isolated machine per session, the same identity,
-and the same observability the Harness gets. The difference: with Strands
-you own the loop and can add explicit steps, branches and pauses; with the
-Harness you own a configuration. This project needed exactly that
+Runtime gives an isolated machine per session, a check on who is
+calling, and traces. The difference from a managed agent such as the
+Harness: with Strands you own the loop and can add explicit steps,
+branches and hooks; with the Harness you own a configuration. This project needed exactly that
 control: a hook that adds the person's own filter before every search,
 which no configuration can express. So the agent *is* this file, grown to
 about 200 lines: `agent/src/main.py`, lesson 17.
@@ -1959,12 +1968,14 @@ sequenceDiagram
 **In our project**
 
 `agent/src/main.py` is the agent. `agent/agentcore/agentcore.json` is the
-Runtime's settings: the code folder, Python 3.14, the Cognito authorizer
+Runtime's settings: the code folder and its Dockerfile, the Cognito authorizer
 (discovery URL and app client), the `Authorization` header allowed through
 to the code, and two environment variables (the Gateway URL, the memory
-id). `npx @aws/agentcore deploy` packages `agent/src`, builds the
-CloudFormation stack in `agent/agentcore/cdk`, and creates or updates the
-Runtime `docscopilot_docscopilotagent`. Its role got one extra policy,
+id). `npx @aws/agentcore deploy` builds the container from `agent/src/Dockerfile`
+in the cloud (CodeBuild, for arm64), deploys the CloudFormation stack in
+`agent/agentcore/cdk`, and creates or updates the Runtime
+`docscopilot_copilot`. A container, not a zip of the code: the browser
+tool's driver must be executable, and a zip loses that (lesson 25). Its role got one extra policy,
 `DocsCopilotAgentTools`: the model, our memory, the browser.
 
 **Try it**
@@ -2472,6 +2483,87 @@ docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/identity.htm
 | **workload identity** | an identity record per agent and gateway, created automatically | exists for the Runtime and the Gateway; unused by us directly |
 | **outbound credential providers**, the **token vault** | stored OAuth clients and API keys, so an agent can call GitHub or Google as a person after a one-time consent | tried and dropped (lesson 25): the Harness never sends the return URL the vault needs, so the consent step cannot start |
 
+**Under the hood: OAuth from zero**
+
+Two words first, because every login story mixes them up:
+
+- **Authentication** answers *who are you*. Signing in is authentication.
+- **Authorization** answers *what may you do*. IAM policies (lesson 9) and Cedar rules (lesson 28) are authorization.
+
+A token from Cognito proves the first. The checks that read the token's
+`sub` and decide what to show are the second.
+
+**What OAuth is.** OAuth 2.0 is the standard way one program gets
+permission to act for you at another program, without you handing over
+your password. The everyday version: a hotel key card. The front desk
+(the login service) checks your ID once, then gives you a card that
+opens your room and the gym until Thursday. The room door (an API) never
+sees your ID; it checks the card. Lose the card, and the desk cancels it
+without changing who you are.
+
+Four roles appear in every OAuth story:
+
+| Role | Plain words | Here |
+|---|---|---|
+| **resource owner** | the person | you |
+| **client** | the program that wants to act for the person | our web page |
+| **authorization server** | the login service that checks the person and issues tokens | Cognito |
+| **resource server** | the program that holds what the person wants | FastAPI, Runtime and the Gateway, each of which checks the token |
+
+**Three-legged versus two-legged.** The "legs" are the parties in the
+handshake.
+
+- **3-legged (three parties: person, client, authorization server).** The person is present and *consents*. The client sends the person to the login page, the person signs in, the login service sends the person back with a one-time code, the client trades the code for tokens. The token then acts *on behalf of that person*. This is the **authorization code flow**, and it is exactly what our page does (`frontend/lib/auth.ts`). PKCE is its extra lock for clients that cannot keep a secret, such as a page in a browser.
+- **2-legged (two parties: client, authorization server).** No person. A program signs in as *itself* with a client id and a client secret, and gets a token that acts as the program. This is the **client credentials flow**, used for machine-to-machine calls: a nightly job calling an API, one service calling another. This project does not use it; the AWS side uses IAM signatures for that job instead (the Gateway role calling the Knowledge Base, the Runtime role calling the model).
+
+The word **consent** belongs to the 3-legged flow: the moment the person,
+on the login service's page, agrees that this client may act for them.
+With our own app the consent screen is skipped, because Cognito treats
+our own app client as trusted. It matters when the client is *someone
+else's* app asking for *your* GitHub or Google.
+
+**Tokens, three kinds.** Cognito hands the page three at sign-in:
+
+| Token | For | Ours |
+|---|---|---|
+| **access token** | proving to an API that this person may act; carries `sub`, `client_id`, `scope`, expiry | sent on every request; checked by FastAPI, Runtime, the Gateway |
+| **id token** | telling the *client* who signed in: name, email | read once by the page to show your email in the header |
+| **refresh token** | getting a new access token after the hour without signing in again | not used; after an hour the page simply signs in again, which Cognito remembers for that hour (a deliberate shortcut, `frontend/lib/auth.ts`) |
+
+**"On behalf of", the fourth thing.** Sometimes a program that already
+holds a person's token needs to call a *further* program as that person.
+Two documented ways: **token exchange** (RFC 8693), where the middle
+program trades the person's token for a new one aimed at the next
+program, which needs a login service that offers that grant; or simply
+**forwarding the same token**, when every program in the chain trusts
+the same login service. Cognito does not offer token exchange. Every hop
+in this project trusts the same Cognito pool, so the token is forwarded
+as is: page to FastAPI to Runtime to Gateway, verified at each stop.
+That forwarding is the whole reason the Harness had to go (lesson 25): it
+could not forward a token, only exchange one, and there was nothing to
+exchange with.
+
+**Where the token vault fits.** AgentCore Identity's token vault does the
+3-legged flow *for an agent* against third-party login services: it
+stores the client id and secret, sends the person to GitHub's or Google's
+consent page, keeps the resulting token per person, and refreshes it. It
+also does the 2-legged flow for API keys and machine tokens. We tried the
+3-legged path so the Harness could reach our own Gateway as the person;
+the Harness never sent the return address the vault requires, so the
+consent step could not begin. The concept is sound; that one product path
+was not ready.
+
+**Reading the chain in one line each:**
+
+```
+page  -> Cognito        3-legged, authorization code + PKCE   "sign me in"
+page  -> FastAPI        bearer token                          "this is me"
+FastAPI -> Runtime      the same token, forwarded             Runtime checks it against Cognito
+Runtime -> Gateway      the same token, forwarded             Gateway checks it, then Cedar decides
+Runtime -> model, memory, browser   IAM role, not OAuth       the agent as itself, inside our account
+Gateway -> Knowledge Base, Lambda   IAM role, not OAuth       the gateway as itself
+```
+
 **Why the Harness had to go.** SigV4 callers get no per-user identity
 propagation, and a Harness calls its Gateway with SigV4 or through the
 token vault, nothing else ([Harness security](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)).
@@ -2658,12 +2750,14 @@ a lesson.
 | "the client session is currently running" from Strands | the Gateway client was started twice: a `with` block and the agent both start it | pass the client to the agent, no `with` |
 | `insufficient_scope` from the Gateway | its allowed client was the wrong app client | allowed client = the page's app client, the token the agent forwards |
 | the CDK build said `tsc: command not found`, then `moduleResolution=node10 removed` | the deploy runs `tsc`; the global TypeScript was too new | `npm install` inside `agent/agentcore/cdk` so its pinned TypeScript is used |
+| the browser tool failed on Runtime with `PermissionError(13)` while it worked on the laptop | the first deploy shipped the code as a zip, and a zip drops the execute bit on the browser driver | a container build with a Dockerfile; a Runtime cannot switch from zip to container, so the agent was recreated under a new name |
+| "Search the web" found nothing, or pasted raw page text | Google blocks the browser; the model dumped what it read | rule 1: DuckDuckGo's plain results page, then the best result, answer in own words |
 
 **Check yourself**
 
 1. Llama 4 Maverick supports tool use. Why could the Harness not use it?
 2. Name three things the managed services made unnecessary.
-3. What did the real-browser test find that the 51 automated tests could not?
+3. What did the real-browser test find that the 73 automated tests could not?
 
 ---
 
@@ -2779,7 +2873,7 @@ open, the same data could go to any tool, not only CloudWatch.
 
 ```
 trace: one question, 9.8 s
-├── session  docscopilot_docscopilotagent                           9.8 s
+├── session  docscopilot_copilot                           9.8 s
 │   ├── memory: load short-term events + search long-term records   0.3 s
 │   ├── model call 1  mistral-large-3   in 3,561  out 84             2.1 s
 │   ├── tool call  docs___Retrieve  {"retrievalQuery": {"text": "enable MFA"}}   1.2 s
@@ -2798,14 +2892,14 @@ observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/obs
 Two switches decide whether they are kept:
 
 1. **CloudWatch Transaction Search**, once per account. Checked on 2026-09-13: already on (trace destination `CloudWatchLogs`, status `ACTIVE`).
-2. **Tracing on our Runtime**, `docscopilot_docscopilotagent`. Its logs land in `/aws/bedrock-agentcore/runtimes/docscopilot_docscopilotagent-zvW96BDxn1-DEFAULT`; whether spans arrive there is the switch to check first (not verified yet on this branch, 2026-09-15).
+2. **Tracing on our Runtime**, `docscopilot_copilot`. Its logs land in `/aws/bedrock-agentcore/runtimes/docscopilot_copilot-cEMT6NGCod-DEFAULT`; whether spans arrive there is the switch to check first (not verified yet on this branch, 2026-09-15).
 
 Every trace, span and metric is stored in CloudWatch, which bills for
 ingestion and storage: cents at our volume.
 
 **Try it**
 
-1. AgentCore console, **Agent Runtime**, `docscopilot_docscopilotagent`, the **Tracing** pane. If it says Disabled: **Edit**, toggle to Enable, **Save**.
+1. AgentCore console, **Agent Runtime**, `docscopilot_copilot`, the **Tracing** pane. If it says Disabled: **Edit**, toggle to Enable, **Save**.
 2. In the app, ask "What are the steps to enable MFA for a user?" and then a URL question.
 3. CloudWatch console, **GenAI Observability** (under AI Operations in the left menu), **Bedrock AgentCore**, **Agents**: pick the agent, open the latest session, open its trace. Click each span: the model call shows the model id and token counts, the tool span shows the exact query the model wrote, the gateway span shows the Knowledge Base call under it.
 4. Compare the two traces: the document question is two model spans and one tool span; the web page is four model spans and a browser session with navigate and get-text steps under it. Find where the time went.
@@ -3041,16 +3135,22 @@ Every word the course introduces, one line each. Alphabetical.
 
 | Word | Plain meaning | Lesson |
 |---|---|---|
+| 2-legged OAuth | a program signs in as itself with a client id and secret; no person; the client credentials flow | 22 |
+| 3-legged OAuth | a person signs in and consents; the program then acts on their behalf; the authorization code flow | 22 |
 | access key | a username and password pair for programs to call AWS | 9 |
 | access token | the Cognito token the page sends on every request; claims inside name the person and the app | 22 |
 | actor id | AgentCore Memory's name for whose memory it is; here the signed-in person's `sub` | 20 |
 | agent | a model in a loop: decide, call a tool, read the result, decide again | 16 |
-| AgentCore | AWS's set of managed services for running agents: Harness, Gateway, Memory, Browser, and more | 17 |
+| AgentCore | AWS's set of managed services for running agents: Runtime, Gateway, Memory, Browser, Identity, Policy, and more | 17 |
 | allowlist | a fixed list of what is permitted; the proxy forwards only `chat`, `documents`, `sessions` | 7 |
 | API | a program other programs talk to over HTTP | 4 |
 | app client | our page's registration with the Cognito user pool; public, so it has no secret | 22 |
 | ARN | Amazon Resource Name: the full address of one AWS resource | 9 |
 | async def | a Python function that says when it is waiting, so the server can serve others meanwhile | 5 |
+| authentication | proving who you are; signing in | 22 |
+| authorization | deciding what you may do; IAM policies and Cedar rules | 9, 22 |
+| authorization code | the one-time code Cognito sends back after sign-in, traded for tokens | 22 |
+| authorization server | the login service that checks people and issues tokens; Cognito here | 22 |
 | BFF | backend for frontend: a server route the page calls, which calls the real API | 7 |
 | bi-encoder | a model that encodes question and chunk separately; what an embedding model is; makes an index possible | 13 |
 | blocking | a call that holds its thread until it finishes; boto3 does this | 5 |
@@ -3065,9 +3165,12 @@ Every word the course introduces, one line each. Alphabetical.
 | CI | continuous integration: a robot runs the checks on every push | 3 |
 | citation | a mark like `[1]` in the answer pointing at the chunk that supports it | 13 |
 | claim | one field inside a token: `sub`, `iss`, `client_id`, `exp` | 22 |
+| client (OAuth) | the program acting for a person; our page | 22 |
 | client component | a React component that runs in the browser; its file starts with `"use client"` | 7 |
+| client credentials | the 2-legged flow: client id and secret in, a token for the program itself out | 22 |
 | Cognito | AWS's login service: user pools, a hosted login page, tokens | 22 |
 | commit | one saved snapshot of the project | 2 |
+| consent | the person agreeing, on the login service's page, that a program may act for them | 22 |
 | content block | one piece of a model message (text, reasoning, a tool call, a tool result), streamed as start, deltas, stop | 17 |
 | context window | the most text a model can hold in one call | 11 |
 | contextual grounding check | a Guardrail check that blocks an answer not supported by the retrieved passages | 28 |
@@ -3100,6 +3203,7 @@ Every word the course introduces, one line each. Alphabetical.
 | hybrid search | vector search and keyword search run together, results merged | 13 |
 | IAM | Identity and Access Management: who may do what in an AWS account | 9 |
 | IAM user | an identity for a person; ours is `yashubitra` | 9 |
+| id token | the token that tells the page who signed in, such as the email | 22 |
 | Identity (AgentCore) | logins for end users (JWT inbound, on our Runtime and Gateway) and a token vault for agents to reach other apps (not used here) | 22 |
 | ingestion job | the Knowledge Base's background run that reads new files; also called a sync | 14 |
 | inline policy | a permission written directly on one role, not shared | 9 |
@@ -3121,8 +3225,10 @@ Every word the course introduces, one line each. Alphabetical.
 | multipart form | the request body format for file uploads | 10 |
 | Neptune Analytics | AWS's graph database engine; stores the GraphRAG graph; bills by the hour | 15 |
 | Next.js | a framework for building web pages with React | 7 |
+| OAuth 2.0 | the standard for letting one program act for you at another without your password | 22 |
 | OAuthUser | the Cedar principal for a caller with a login token; its `id` is the person's `sub` | 28 |
 | observability | metrics, logs, traces and quality scores about a running system | 27 |
+| on behalf of | a program holding a person's token calling a further program as that person, by forwarding or exchanging the token | 22 |
 | OpenTelemetry | the open standard for traces, spans and metrics; AgentCore emits it | 27 |
 | package | published code you install instead of writing, like `fastapi` | 3 |
 | package manager | downloads and installs packages: uv for Python, npm for JavaScript | 3 |
@@ -3137,8 +3243,10 @@ Every word the course introduces, one line each. Alphabetical.
 | RAG | retrieval-augmented generation: find relevant chunks, hand them to the model, answer with citations | 13 |
 | RAG triad | context relevance, faithfulness, answer relevance: the three scores that cover most RAG failures | 29 |
 | React | a library for building web pages out of components | 7 |
+| refresh token | a long-lived token for getting a new access token without signing in again; not used here | 22 |
 | region | which group of AWS data centers a thing lives in; ours is us-west-2 | 8 |
 | reranker | a careful model that re-sorts the top search results by how well each answers the question | 13 |
+| resource server | the program that holds what the person wants and checks the token; FastAPI, Runtime, the Gateway | 22 |
 | Retrieve | the Knowledge Base call: question in, best chunks out | 14 |
 | role | an AWS identity for a service; no password, assumed automatically | 9 |
 | root user | the AWS account owner login; owner tasks only | 9 |
@@ -3165,6 +3273,7 @@ Every word the course introduces, one line each. Alphabetical.
 | test | a small program that runs our code with made-up input and checks the output | 3 |
 | thread pool | worker threads that run blocking code off the main loop; 40 by default | 5 |
 | token | about three quarters of a word; the billing unit for models | 11 |
+| token exchange | trading one token for another aimed at a different program; needs a login service that offers it, which Cognito does not | 22 |
 | token vault | AgentCore Identity's store of OAuth clients and API keys an agent may borrow, without seeing the secret | 22 |
 | tool call | the model asking for a tool by name with JSON arguments; the loop runs it | 16 |
 | tool schema | a tool's menu entry: name, description (what the model reads), input fields | 18 |

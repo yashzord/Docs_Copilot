@@ -20,11 +20,13 @@ backend, **Terminal 3** for the page.
 
 | Step | Run or click | You should see |
 |---|---|---|
+| 0. Use the login branch (Terminal 1, once) | `cd ~/Projects/personal/Docs_Copilot && git switch feat/login-runtime-agent && cp -n backend/.env backend/.env.main && cp backend/.env.branch backend/.env` | `Switched to branch 'feat/login-runtime-agent'`. The first copy keeps main's settings safe as `backend/.env.main` |
 | 1. Start the graph (Terminal 1) | `aws neptune-graph start-graph --graph-identifier g-3h3xul06x6 --region us-west-2 --profile docs-copilot-dev` | `"status": "STARTING"`. If it says `ConflictException`, the graph is already starting or stopping: do not retry at once, go to step 2 |
 | 2. Wait until it is ready (Terminal 1, every minute) | `aws neptune-graph get-graph --graph-identifier g-3h3xul06x6 --region us-west-2 --profile docs-copilot-dev --query status` | `"AVAILABLE"`, after 5 to 15 minutes. If it shows `"STOPPING"` or `"STOPPED"`, wait for `"STOPPED"`, then run step 1 again |
 | 3. Start the backend (Terminal 2) | `cd ~/Projects/personal/Docs_Copilot/backend && uv run uvicorn app.main:app --port 8001` | `Uvicorn running on http://127.0.0.1:8001` |
 | 4. Start the page (Terminal 3) | `cd ~/Projects/personal/Docs_Copilot/frontend && npm run dev` | `Local: http://localhost:3000` |
 | 5. Open the page and the map | http://localhost:3000, **Sign in** with your own account, and the interactive map (link at the top of `docs/course.md`) | Cognito's login page, then the chat page with your email top right |
+| 5b. First sign-in, and a second person for flow step 8b (Terminal 1, once) | Your first sign-in asks for the temporary password from the invite email, then a new one. Second person: `aws cognito-idp admin-create-user --user-pool-id us-west-2_kMn6l3sGV --username <second email> --user-attributes Name=email,Value=<second email> Name=email_verified,Value=true --message-action SUPPRESS --region us-west-2 --profile docs-copilot-dev`, then `aws cognito-idp admin-set-user-password --user-pool-id us-west-2_kMn6l3sGV --username <second email> --password '<a password with a digit>' --permanent --region us-west-2 --profile docs-copilot-dev` | your email top right; the second account can sign in without any email |
 | 6. Upload the guide once now (only once step 2 says `"AVAILABLE"`) | in the page, **Upload a file**: `~/Downloads/Secure-Transfers-User-Guide.pdf` | "Indexing..." for a few minutes, then "Ready to ask ... The graph is updating in the background too." Skip if the guide is already listed under Documents |
 | 7. Wait for the graph to finish reading it (Terminal 1, every minute) | `aws bedrock-agent list-ingestion-jobs --knowledge-base-id 3AD25HSRSD --data-source-id 6B3TDMPBRL --region us-west-2 --profile docs-copilot-dev --sort-by attribute=STARTED_AT,order=DESCENDING --max-results 1 --query 'ingestionJobSummaries[0].status'` | `"COMPLETE"`. The graph reads all 246 pages with an AI model, so it is slower than the page's own sync |
 | 8. Warm-up question (not shown) | ask "What is SecureTransfers?" | an answer with source cards from the guide. The first question wakes everything up, so the demo's first answer is fast |
@@ -45,8 +47,8 @@ line has a lesson number in `docs/course.md` for the full story.
 
 **The one sentence.** "Docs Copilot: sign in, upload documents, ask
 questions, get answers with the exact sources, from one AI agent, our own
-code hosted by AWS, that can also read live web pages. Every person sees
-only their own documents, chats and memory."
+code hosted by AWS, that can also read live web pages. Every person's
+document search, chats and memory are private to them."
 
 **The pieces, and who made each one**
 
@@ -97,7 +99,7 @@ That is "2 model calls" under every answer: one to decide, one to write.
 - A document question: about 1 cent, 2 model calls, 10 to 15 thousand tokens in.
 - A web page: 2 to 8 cents, 3 or 4 model calls, the whole page's text goes into the model.
 - The graph: $0.48 an hour running, about 5 cents an hour stopped. Everything else bills per use.
-- Code we wrote: about 2,300 lines, plus 73 tests. The rest is AWS services we configured.
+- Code we wrote: about 2,000 lines, plus 73 tests. The rest is AWS services we configured.
 
 **Questions people ask, with the honest answer**
 
@@ -105,7 +107,7 @@ That is "2 model calls" under every answer: one to decide, one to write.
 - *Can it be wrong?* Yes. The citation is not proof, it is a pointer. Open the source card and check. Lesson 13 names the two failures: the search missed, or the model wrote something the passage does not say.
 - *Why AWS managed services instead of building it?* Chunking, embeddings, hybrid search, reranking, memory, the agent loop, the browser: each would be weeks to build well. Configuring them took days and cost cents. Lesson 25 lists what we dropped.
 - *Why this model?* Two others were tried: one could not use tools while streaming, one could not drive the browser. Mistral Large 3 did both.
-- *Is it secure? Who can see my documents?* Only you. The agent adds a filter with your id to every search, and the Gateway's policy refuses any search without it. Proven with two accounts: same question, the other person gets nothing.
+- *Is it secure? Who can see my documents?* Only you. The agent adds a filter with your id to every search, and the Gateway's policy refuses any search without it. Proven with two accounts: same question, the other person gets nothing. One exception, say it out loud: the knowledge graph is shared, so a relationship question can quote anyone's uploads (lesson 28).
 - *Why write your own agent instead of the managed one?* The managed Harness could not carry a person's login to the Gateway. Two hundred lines of our own code could, and that is what makes per-person privacy enforceable.
 - *What would you do next?* Tracing of every step, guardrails on the model, and an evaluation set so changes are measured instead of eyeballed.
 - *What broke along the way?* Plenty: lesson 25 has the table. The demo is the version that survived.
@@ -119,8 +121,8 @@ That is "2 model calls" under every answer: one to decide, one to write.
 Say: "Sign in, upload documents, ask questions, get answers with the exact
 sources. Behind it is one AI agent, our code, hosted by AWS. For each
 question it picks a tool: a document search, a knowledge graph, or a live
-web browser. And it can only ever search the documents of the person
-asking."
+web browser. And its document search only ever sees the
+documents of the person asking."
 
 Point at: the four columns on the map, left to right: your laptop, the
 agent, the tools, the data. Solid boxes are code we wrote; dashed boxes are
@@ -196,7 +198,7 @@ in the sidebar.
 Click **Document question** on the map and step through with the arrow keys.
 Stop on three hops:
 - hop 4, "FastAPI starts the agent": our code hands the question to AWS
-- hop 7, "The agent calls the tool over MCP, as you": one standard plug for every tool, and the Gateway's policy checks the filter is yours
+- hop 7, "The Harness calls the tool over MCP" (the map still draws the main version, so say "our agent, calling as you"): one standard plug for every tool, and the Gateway's policy checks the filter is yours
 - hop 10, "FastAPI translates the stream": how the answer arrives piece by piece
 
 Then click the **Gateway** box and read its "Acts as" line. Say: "Every call
@@ -205,7 +207,7 @@ that call."
 
 ### 8b. Two people (1 minute)
 
-Click **Sign out**, sign in as the second account, and ask step 3's
+Needs preparation step 5b. Click **Sign out**, sign in as the second account, and ask step 3's
 question again.
 
 Point at: an empty sidebar, and the answer "not in your documents". Say:
@@ -232,6 +234,7 @@ Good answers to have ready:
    aws neptune-graph stop-graph --graph-identifier g-3h3xul06x6 --region us-west-2 --profile docs-copilot-dev
    ```
 2. Press Ctrl+C in Terminal 2 and Terminal 3 to stop the servers.
+3. Before any demo of main: `git switch main && cp backend/.env.main backend/.env`.
 
 ---
 

@@ -2,8 +2,7 @@
 
 Sign in, upload documents, ask questions, and get streamed answers with
 citations from one AI agent that can also read web pages and connect facts
-across documents. Every person sees only their own documents, chats and
-memory. Built step by step as a learning project.
+across documents. Every person's document search, chats and memory are private to them. Built step by step as a learning project.
 
 New here? Start with `docs/course.md`: the crash course, 29 lessons from
 zero, in order, with plain words and pictures. The same course as a page

@@ -1110,7 +1110,7 @@ The graph search tool takes only a query, the Lambda runs it without any filter,
 
 ### The problem
 
-You now have two working versions of one app. They need different settings, different AWS resources and different commands, and they live in the same folder. Switching carelessly means a server that refuses to start, or worse, a page that talks to the wrong agent.
+You now have two working versions of one app. They need different settings, different AWS resources and different commands, and they live in the same folder. Switching carelessly means a server whose first request fails, or worse, a page that talks to the wrong agent.
 
 Think of a theatre with two productions in the same week. Same stage, same lights, different sets and different cast lists. The crew keeps each set in its own labelled crates and swaps them completely between shows. Nobody performs Tuesday's play with half of Monday's scenery.
 
@@ -1123,8 +1123,8 @@ Think of a theatre with two productions in the same week. Same stage, same light
 | Key | main | login branch |
 |---|---|---|
 | `AWS_PROFILE`, `AWS_REGION`, `S3_BUCKET`, `KB_ID`, `KB_DATA_SOURCE_ID`, `GRAPH_KB_ID`, `GRAPH_DATA_SOURCE_ID`, `MEMORY_ID` | yes | yes |
-| `HARNESS_ARN` | yes | unknown: refuses to start |
-| `AGENT_RUNTIME_ARN`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unknown: refuses to start | yes |
+| `HARNESS_ARN` | yes | unknown: the first request fails |
+| `AGENT_RUNTIME_ARN`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unknown: the first request fails | yes |
 
 So each branch gets its own crate: `backend/.env.main` and `backend/.env.branch`, both ignored by git (the `.env.*` rule, lesson 2), copied into place as `backend/.env` when you switch.
 
@@ -1308,7 +1308,7 @@ The `npm install` is needed once (lesson 32). The deploy builds the arm64 image 
 1. You switched to the branch but forgot `cp backend/.env.branch backend/.env`. What happens when you start the backend, and why?
 <details><summary>Answer</summary>
 
-It refuses to start. The old `.env` has `HARNESS_ARN`, which the branch's settings do not know, and lacks `AGENT_RUNTIME_ARN` and the Cognito ids it requires. `settings.py` treats both as errors.
+It starts, but its first request fails with a settings error. The old `.env` has `HARNESS_ARN`, which the branch's settings do not know, and lacks `AGENT_RUNTIME_ARN` and the Cognito ids it requires. `settings.py` treats both as errors.
 </details>
 
 2. Why does `cp -n backend/.env backend/.env.main` use `-n`?

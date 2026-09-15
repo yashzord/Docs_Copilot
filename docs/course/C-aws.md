@@ -130,7 +130,7 @@ A **budget** is an alarm, not a cap. AWS does not stop services when a budget is
 
 ### In our project
 
-`backend/.env` names the region and every AWS resource the server talks to, by id. `backend/.env.example` is the same list with a comment per line saying where each id comes from in the console. `backend/app/settings.py` reads them: `aws_region` defaults to `us-west-2`, and the bucket, both Knowledge Bases, the Harness and the Memory ids are required, so the server refuses to start without them.
+`backend/.env` names the region and every AWS resource the server talks to, by id. `backend/.env.example` is the same list with a comment per line saying where each id comes from in the console. `backend/app/settings.py` reads them: `aws_region` defaults to `us-west-2`, and the bucket, both Knowledge Bases, the Harness and the Memory ids are required, so if one is missing, the first request fails with a settings error.
 
 | Setting | Value on main | What it points at |
 |---|---|---|

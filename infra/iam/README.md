@@ -14,7 +14,7 @@ each attached and verified before the switch.
 
 Attach to the IAM user `yashubitra` (IAM, Users, Add permissions, Create
 inline policy, JSON). Each file is one inline policy. Plain words on what
-each allows and why are in `docs/learning/aws.md` sections 2 and 10.5.
+each allows and why are in lessons 9 and 22 of `docs/course/`.
 
 | Policy | Allows | Why |
 |---|---|---|

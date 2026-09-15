@@ -2,7 +2,7 @@
 
 About 10 minutes on stage, plus about 45 minutes of preparation. What to
 run, what to click, what to say, what to point at, and what to do if a step
-is slow. Written for the demo on 2026-09-12.
+is slow. Written for the demo on 2026-09-12; checked again on 2026-09-15.
 
 Everything in the demo is about one document: the **Secure Transfers User
 Guide** (`~/Downloads/Secure-Transfers-User-Guide.pdf`), a real 246-page
@@ -93,7 +93,7 @@ That is "2 model calls" under every answer: one to decide, one to write.
 - A document question: about 1 cent, 2 model calls, 10 to 15 thousand tokens in.
 - A web page: 2 to 8 cents, 3 or 4 model calls, the whole page's text goes into the model.
 - The graph: $0.48 an hour running, about 5 cents an hour stopped. Everything else bills per use.
-- Code we wrote: about 1,100 lines on main, plus 73 tests across both branches. The rest is AWS services we configured.
+- Code we wrote: about 1,500 lines on main, plus 51 tests. The login branch adds about 500 lines and 22 tests. The rest is AWS services we configured.
 
 **Questions people ask, with the honest answer**
 
@@ -101,7 +101,7 @@ That is "2 model calls" under every answer: one to decide, one to write.
 - *Can it be wrong?* Yes. The citation is not proof, it is a pointer. Open the source card and check. Lesson 13 names the two failures: the search missed, or the model wrote something the passage does not say.
 - *Why AWS managed services instead of building it?* Chunking, embeddings, hybrid search, reranking, memory, the agent loop, the browser: each would be weeks to build well. Configuring them took days and cost cents. Lesson 25 lists what we dropped.
 - *Why this model?* Two others were tried: one could not use tools while streaming, one could not drive the browser. Mistral Large 3 did both.
-- *Is it secure? Who can see my documents?* On this version, one user, on purpose, and the bucket is private. The other branch adds a real login and makes every search private per person, enforced by a policy the model cannot argue with.
+- *Is it secure? Who can see my documents?* On this version, one user, on purpose, and the bucket is private. The other branch adds a real login and makes every document search private per person, enforced by a policy the model cannot argue with.
 - *What would you do next?* The login branch is built and tested. Then tracing of every step, guardrails on the model, and an evaluation set so changes are measured instead of eyeballed.
 - *What broke along the way?* Plenty: lesson 25 has the table. The demo is the version that survived.
 

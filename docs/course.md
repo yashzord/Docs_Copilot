@@ -2390,7 +2390,7 @@ permissions at once, `InvokeHarness` on the harness and
 `InvokeAgentRuntime` on the runtime underneath it. Reading the sidebar
 needs `ListSessions` and `ListEvents` on the memory.
 
-**Under the hood: AgentCore Identity, and why not yet**
+**Under the hood: AgentCore Identity, and why main does not use it**
 
 Everything above is IAM: identities for *your account's* people and
 services. **AgentCore Identity** is the piece for the two identities IAM
@@ -2413,16 +2413,16 @@ That is the honest reason Identity is not in this project: with one
 user and no third-party apps, both halves have nothing to do. The
 `dev` header stub stands exactly where a verified user id would go.
 
-**What it would take to add.** One day, no architecture change:
+**What adding it turned out to take.** The branch `feat/login-runtime-agent`
+tried the plan above and hit two walls:
 
-1. A Cognito user pool with a hosted login page; the Next.js page signs in and holds the id token.
-2. `authorizerConfiguration: {customJWTAuthorizer: {discoveryUrl, allowedClients}}` on the Harness. Calls then carry `Authorization: Bearer <token>` instead of an IAM signature.
-3. The backend takes the user id from the token's claims and uses it as the Memory actor id and the tenant label. Every user gets their own conversations and long-term memory, and the label written in lesson 10 finally gets a filter.
-4. Optionally, a Cedar policy on the Gateway that reads the user's claims (lesson 28), which is the layered pattern AWS shows with Cognito plus AgentCore plus Cedar ([walkthrough](https://builder.aws.com/content/3EaHytE8A8uqqkW6ektZcFLGz06/enforce-layered-end-to-end-access-control-for-ai-agents-with-amazon-bedrock-agentcore-amazon-cognito-and-cedar)).
+1. JWT inbound on the Harness works, but the Harness cannot pass the person's token on to the Gateway, so the Gateway still cannot tell who asked.
+2. The Harness's 3-legged OAuth path asks the token vault for a user token without the return address the vault requires, so every attempt failed.
 
-The second half, a 3-legged OAuth provider so the agent can open a GitHub
-issue as you, is the "action tool" idea from the early plan. It needs
-the first half in place.
+So that branch replaced the Harness with a small Strands agent on AgentCore
+Runtime. The agent forwards the person's own token to the Gateway, where a
+Cedar policy checks every document search (lesson 28 on that branch). Main
+keeps the Harness and no login.
 
 **Try it**
 
@@ -2821,8 +2821,10 @@ flowchart LR
 
 **In our project**
 
-Neither exists yet (checked 2026-09-13: no policy engines, no
-guardrails). The prompt is the only rule layer. Adding them is
+Main uses neither. Guardrails do not exist in the account (checked
+2026-09-13). A policy engine exists now, but only the login branch's
+Gateway uses it; main's Gateway has none attached. On main the prompt is
+the only rule layer. Adding them is
 configuration plus one permission, no code, with one small exception:
 our relay ignores the stop reason, so a `guardrail_intervened` stop would
 show as an empty answer until `chat.py` learns to turn it into a message.

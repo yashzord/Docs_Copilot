@@ -4,14 +4,14 @@ Sign in, upload documents, ask questions, and get streamed answers with
 citations from one AI agent that can also read web pages and connect facts
 across documents. Every person's document search, chats and memory are private to them. Built step by step as a learning project.
 
-New here? Start with `docs/course.md`: the crash course, 29 lessons from
-zero, in order, with plain words and pictures. The same course as a page
-with a sidebar: link at the top of that file.
+New here? Start with `docs/course/README.md`: the course, one story in
+eight parts and 35 lessons, from zero, in plain words and pictures. This
+branch is Part H, told as the next chapter after the main version.
 
 ### Branches
 
 - `main`: the earlier working version. Single user, no login, the AgentCore Harness answers.
-- `feat/login-runtime-agent` (this branch): Cognito login, documents private per person, and our own Strands agent on AgentCore Runtime instead of the Harness. This README and `docs/course.md` describe this version.
+- `feat/login-runtime-agent` (this branch): Cognito login, documents private per person, and our own Strands agent on AgentCore Runtime instead of the Harness. This README and `docs/course/` describe this version.
 
 ---
 
@@ -100,7 +100,7 @@ these, not just how to switch them on.
 - Buy the plumbing, build the glue: AWS managed services for retrieval, the graph, hosting the agent, memory, the browser and login; our own code for the API, the UI, the agent file and one small Lambda.
 - About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour) is stopped when idle and deleted after the demo.
 - Models are config, not code: switching one is a single line.
-- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course.md`.
+- Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course/`.
 
 ### The big picture
 
@@ -169,7 +169,7 @@ agent/               the agent, its own Python project (its own dependencies, it
 infra/
   iam/               IAM policies, kept as documentation
   lambda/graph_search/  the graph search Lambda + its tool schema
-docs/                course.md (the crash course) and demo.md (the demo script)
+docs/                course/ (the course, one file per part) and demo.md (the demo script)
 ```
 
 New backend code starts inside `backend/app`. The agent is its own package
@@ -243,13 +243,12 @@ Conventional Commits (`feat:`, `fix:`, `chore:`). No self-merge.
 
 ## 7. Learning docs
 
-One file: `docs/course.md`, the crash course. Twenty-nine lessons in seven
-parts, written for someone new to coding: the terminal and git, the web
-part, AWS from zero, AI from zero, the agent, putting it together, and
-running it like production, then a glossary. Every lesson has the same
-shape: the idea, a picture, where it lives in this project, one thing to
-try on your own data, and questions to check yourself. What was tried and
-dropped is lesson 25, and the Harness is now part of that story.
+`docs/course/`: the course, one story told in order. One file per part
+(A to H) plus a story map (`README.md`) and a glossary. Every lesson first
+teaches the whole topic, every common way people solve it, then shows where
+this project sits. Parts A to G tell the main version. Part H (lessons 30 to
+35) tells this branch: login, your own agent on Runtime, identity at every
+hop, and the Cedar policy.
 
-The same course is published as a page with a sidebar (link at the top of
-the file), next to the interactive map of the whole system.
+The same course is published as a page with a sidebar (link in
+`docs/course/README.md`).

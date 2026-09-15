@@ -25,7 +25,7 @@ backend, **Terminal 3** for the page.
 | 2. Wait until it is ready (Terminal 1, every minute) | `aws neptune-graph get-graph --graph-identifier g-3h3xul06x6 --region us-west-2 --profile docs-copilot-dev --query status` | `"AVAILABLE"`, after 5 to 15 minutes. If it shows `"STOPPING"` or `"STOPPED"`, wait for `"STOPPED"`, then run step 1 again |
 | 3. Start the backend (Terminal 2) | `cd ~/Projects/personal/Docs_Copilot/backend && uv run uvicorn app.main:app --port 8001` | `Uvicorn running on http://127.0.0.1:8001` |
 | 4. Start the page (Terminal 3) | `cd ~/Projects/personal/Docs_Copilot/frontend && npm run dev` | `Local: http://localhost:3000` |
-| 5. Open the page and the map | http://localhost:3000, **Sign in** with your own account, and the interactive map (link at the top of `docs/course.md`) | Cognito's login page, then the chat page with your email top right |
+| 5. Open the page and the map | http://localhost:3000, **Sign in** with your own account, and the interactive map (link in `docs/course/README.md`) | Cognito's login page, then the chat page with your email top right |
 | 5b. First sign-in, and a second person for flow step 8b (Terminal 1, once) | Your first sign-in asks for the temporary password from the invite email, then a new one. Second person: `aws cognito-idp admin-create-user --user-pool-id us-west-2_kMn6l3sGV --username <second email> --user-attributes Name=email,Value=<second email> Name=email_verified,Value=true --message-action SUPPRESS --region us-west-2 --profile docs-copilot-dev`, then `aws cognito-idp admin-set-user-password --user-pool-id us-west-2_kMn6l3sGV --username <second email> --password '<a password with a digit>' --permanent --region us-west-2 --profile docs-copilot-dev` | your email top right; the second account can sign in without any email |
 | 6. Upload the guide once now (only once step 2 says `"AVAILABLE"`) | in the page, **Upload a file**: `~/Downloads/Secure-Transfers-User-Guide.pdf` | "Indexing..." for a few minutes, then "Ready to ask ... The graph is updating in the background too." Skip if the guide is already listed under Documents |
 | 7. Wait for the graph to finish reading it (Terminal 1, every minute) | `aws bedrock-agent list-ingestion-jobs --knowledge-base-id 3AD25HSRSD --data-source-id 6B3TDMPBRL --region us-west-2 --profile docs-copilot-dev --sort-by attribute=STARTED_AT,order=DESCENDING --max-results 1 --query 'ingestionJobSummaries[0].status'` | `"COMPLETE"`. The graph reads all 246 pages with an AI model, so it is slower than the page's own sync |
@@ -43,7 +43,7 @@ watch, while the questions are answered from the copy already indexed.
 ## Know what you built, on one page
 
 Read this before the demo until you can say it without looking. Every
-line has a lesson number in `docs/course.md` for the full story.
+line has a lesson number in `docs/course/` for the full story.
 
 **The one sentence.** "Docs Copilot: sign in, upload documents, ask
 questions, get answers with the exact sources, from one AI agent, our own
@@ -99,7 +99,7 @@ That is "2 model calls" under every answer: one to decide, one to write.
 - A document question: about 1 cent, 2 model calls, 10 to 15 thousand tokens in.
 - A web page: 2 to 8 cents, 3 or 4 model calls, the whole page's text goes into the model.
 - The graph: $0.48 an hour running, about 5 cents an hour stopped. Everything else bills per use.
-- Code we wrote: about 2,000 lines, plus 73 tests. The rest is AWS services we configured.
+- Code we wrote: about 2,200 lines, plus 73 tests. The rest is AWS services we configured.
 
 **Questions people ask, with the honest answer**
 
@@ -221,7 +221,7 @@ Sign back in as yourself.
 Good answers to have ready:
 - **Can it answer anything, or only the documents?** It searches your documents first, uses the browser for URLs and recent things, and answers general questions from its own knowledge while saying so. It remembers preferences you tell it across chats.
 - **Cost:** a document question is about 1 cent; a web page 2 to 8 cents; indexing the guide a few cents. The graph is the only part billed by the hour: $0.48 an hour running, about 5 cents stopped.
-- **Why this model:** Llama 4 could not use tools while streaming, and gpt-oss could not drive the browser. Mistral Large 3 did both (`docs/course.md` lesson 11).
+- **Why this model:** Llama 4 could not use tools while streaming, and gpt-oss could not drive the browser. Mistral Large 3 did both (lesson 11 in `docs/course/`).
 - **What is ours and what is AWS:** our code is the page, the proxy, the FastAPI backend, the agent (200 lines of Python, hosted on AgentCore Runtime) and one Lambda. The login, the search, the graph, the memory, the browser and the policy engine are AWS services we set up.
 - **Where does "only your documents" get enforced?** Twice. The agent adds the filter in code before every search. The Gateway's Cedar policy refuses a search whose filter is not the caller's id. Neither depends on the model behaving.
 

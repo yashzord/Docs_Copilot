@@ -67,6 +67,22 @@ documents."
 | Cost | "About one cent per question." | pay-per-use AWS services; only the knowledge graph bills by the hour | 24 |
 | Safety | "Each person signs in, and every document search is limited to their own files. The assistant also says when something is not in them." | Cognito sign-in, a filter the agent adds to every search, and a Cedar policy on the Gateway that refuses a search without it. The knowledge graph is still shared | 31, 33, 34 |
 
+**The picture to draw, if you draw one**
+
+```mermaid
+flowchart LR
+    Y["You sign in,<br/>then ask a question"] --> App["Docs Copilot"]
+    App --> As["An AI assistant<br/>decides where to look"]
+    As --> D[("Only your own documents")]
+    As --> W["A web page"]
+    As --> Ans["An answer,<br/>with its sources"]
+```
+
+Nothing is named on purpose, and the one word that matters is "only": each
+person searches their own files. If someone wants the real names, the table
+below has them, and `docs/course/README.md` has the full picture and the
+three journeys through it. Lesson 35 redraws that picture for this branch.
+
 **How it works, in one breath.** "You ask a question. An AI assistant first
 decides where to look: your documents, the connections inside them, or the
 web. It finds the best passages, writes the answer from them, and shows you

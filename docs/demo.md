@@ -64,6 +64,21 @@ spread across a long manual."
 | Cost | "About one cent per question." | pay-per-use AWS services; only the knowledge graph bills by the hour | 24 |
 | Safety | "Your documents stay in your own private AWS storage, and the assistant says when something is not in them." | a private S3 bucket, a written rule in the prompt, and AWS roles that each allow one job | 9, 19 |
 
+**The picture to draw, if you draw one**
+
+```mermaid
+flowchart LR
+    Y["You ask a question"] --> App["Docs Copilot"]
+    App --> As["An AI assistant<br/>decides where to look"]
+    As --> D[("Your documents")]
+    As --> W["A web page"]
+    As --> Ans["An answer,<br/>with its sources"]
+```
+
+Nothing is named on purpose. If someone wants the real names, the table
+below has them, and `docs/course/README.md` has the full picture and the
+three journeys through it.
+
 **How it works, in one breath.** "You ask a question. An AI assistant first
 decides where to look: your documents, the connections inside them, or the
 web. It finds the best passages, writes the answer from them, and shows you

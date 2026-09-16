@@ -65,34 +65,105 @@ bills by the hour.
 
 ## The whole system on one sheet (main)
 
-your laptop is code we wrote; everything on AWS is a service we set up.
+Solid arrows are calls. Everything on your laptop is code we wrote;
+everything on AWS is a service we set up.
 
 ```mermaid
 flowchart LR
     subgraph L[Your laptop]
-        B[Chat window<br/>Chat.tsx] --> P[Proxy<br/>route.ts] --> F[Backend<br/>FastAPI]
+        B["Chat window<br/>Chat.tsx"] --> P["Proxy<br/>route.ts"] --> F["Backend<br/>FastAPI"]
     end
     subgraph A[The agent, run by AWS]
-        H[Harness<br/>the loop] --> M[Model<br/>Mistral Large 3]
-        H --> Me[(Memory<br/>chats, preferences)]
-        H --> W[Browser<br/>a real Chrome]
+        H["Harness<br/>the loop"] --> M["Model<br/>Mistral Large 3"]
+        H --> Me[("Memory<br/>chats, preferences")]
+        H --> W["Browser<br/>a real Chrome"]
     end
     subgraph T[Tools]
-        G[Gateway<br/>MCP server] --> La[Lambda<br/>graph search]
+        G["Gateway<br/>MCP server"] --> La["Lambda<br/>graph search"]
     end
     subgraph D[Data]
-        S[(S3 bucket<br/>your files)]
-        K[Knowledge Base<br/>chunk search]
-        GK[Graph Knowledge Base] --> N[(Neptune<br/>the graph)]
+        S[("S3 bucket<br/>your files")]
+        K["Knowledge Base<br/>chunk search"]
+        GK["Graph Knowledge Base"] --> N[("Neptune<br/>the graph")]
     end
     F -->|InvokeHarness| H
     H -->|tool calls| G
     G --> K
     La --> GK
-    F -->|upload| S
-    K -.sync.-> S
-    GK -.sync.-> S
+    F -->|upload, list| S
+    F -->|sidebar: read chats| Me
+    F -->|start sync| K
+    F -->|start sync| GK
+    K -.->|reads on sync| S
+    GK -.->|reads on sync| S
 ```
+
+Two arrows people miss: our backend reads Memory itself for the sidebar,
+and it tells both indexes to start reading after an upload. Everything else
+happens inside the agent.
+
+## The same system as three journeys
+
+One sheet shows the parts. These show what actually happens, one story each.
+
+**Journey 1: you upload a file** (lessons 10 and 14)
+
+```mermaid
+flowchart LR
+    U["1. Upload a file<br/>in the page"] --> F["2. Backend checks<br/>the name and size"]
+    F --> S[("3. S3: the file<br/>and its label")]
+    F --> K["4. Knowledge Base<br/>starts a sync"]
+    F --> GK["5. Graph Knowledge Base<br/>starts a sync"]
+    K -.->|reads on sync| S
+    GK -.->|reads on sync| S
+```
+
+**Journey 2: you ask a question** (lesson 23)
+
+```mermaid
+sequenceDiagram
+    participant Page
+    participant Backend
+    participant Harness
+    participant Model
+    participant Gateway
+    participant KB as Knowledge Base
+    participant Memory
+    Page->>Backend: the question and a chat id
+    Backend->>Harness: InvokeHarness
+    Harness->>Memory: load this chat so far
+    Harness->>Model: rules, question, tools
+    Model-->>Harness: search the documents
+    Harness->>Gateway: Retrieve
+    Gateway->>KB: find passages
+    KB-->>Gateway: the 5 best, with sources
+    Gateway-->>Harness: the passages
+    Harness->>Model: question and passages
+    Model-->>Harness: answer with [1] [2]
+    Harness-->>Backend: word by word
+    Backend-->>Page: text, tool line, source cards
+    Harness->>Memory: save the turn
+```
+
+**Journey 3: you open a past chat** (lesson 20)
+
+```mermaid
+sequenceDiagram
+    participant Page
+    participant Backend
+    participant Memory
+    Page->>Backend: list my chats
+    Backend->>Memory: ListSessions
+    Memory-->>Backend: chat ids and times
+    Page->>Backend: messages of one chat
+    Backend->>Memory: ListEvents
+    Memory-->>Backend: the messages
+    Backend-->>Page: the conversation
+```
+
+The agent is not in journey 3 at all: the sidebar is our backend reading
+Memory directly.
+
 
 If you remember only three sentences, remember these:
 

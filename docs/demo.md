@@ -20,6 +20,8 @@ backend, **Terminal 3** for the page.
 
 ## 45 minutes before
 
+> **The graph was deleted on 2026-09-29.** Stopped, it still cost about 4.8 cents an hour, which is roughly $35 a month, and it had run idle since the demo. Relationship questions now fail until a new graph and Knowledge Base are created and the documents are synced again.
+
 | Step | Run or click | You should see |
 |---|---|---|
 | 1. Start the graph (Terminal 1) | `aws neptune-graph start-graph --graph-identifier g-3h3xul06x6 --region us-west-2 --profile docs-copilot-dev` | `"status": "STARTING"`. If it says `ConflictException`, the graph is already starting or stopping: do not retry at once, go to step 2 |

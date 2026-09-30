@@ -256,7 +256,7 @@ At a larger scale, in this order: turn token counts into dollars per answer and 
 
 | Part | When it costs | About how much |
 |---|---|---|
-| Neptune graph | **every hour it exists**, running or stopped | $0.48 an hour running, about $0.05 stopped, $0 deleted |
+| Neptune graph | **every hour it exists**, running or stopped | $0.48 an hour running, about $0.05 an hour stopped (about $35 a month), $0 deleted. Deleted on 2026-09-29 |
 | the model (Mistral Large 3) | per question | about 1 cent for a document question, 2 to 8 cents for a web page |
 | syncs | per upload | fractions of a cent per small file; a few cents for the guide's graph extraction |
 | Harness, Gateway, Lambda, Memory, Browser | only while used | cents |

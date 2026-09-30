@@ -87,7 +87,7 @@ not just how to switch them on.
 ### Ground rules
 
 - Buy the plumbing, build the glue: AWS managed services for retrieval, the graph, the agent loop and memory; our own code for the API, the UI and one small Lambda.
-- About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour) is stopped when idle and deleted after the demo.
+- About $200 in AWS credits, alarm at $30 a month. Anything billed by the hour (Neptune, $0.48 an hour running and about $35 a month even stopped) is stopped when idle and deleted when the work is done.
 - Models are config, not code: switching one is a single line.
 - Using a managed service never skips understanding it: every AWS piece gets a "what happens inside" lesson in `docs/course/`.
 
@@ -161,7 +161,7 @@ Kubernetes files yet (later/maybe).
 [x] D1  skeleton + streaming chat with Bedrock
 [x] D2  upload -> S3 -> managed Knowledge Base; Gateway exposes it as a tool; Harness answers with citations; sidebar from Memory
 [x] D3  Browser tool on the Harness; long-term memory (facts, preferences)
-[x] D4  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (graph stopped when idle, deleted after the demo)
+[x] D4  GraphRAG Knowledge Base on Neptune Analytics behind the Gateway (graph deleted 2026-09-29; recreate it to use the graph tool)
 
 then   stop and review; reverse-learning pass: trace one question end to end, break things on purpose
 later  maybe: research agent (Strands on Runtime); Observability, Evaluations, Guardrails; Terraform, CI eval gate, k6, kind
@@ -177,7 +177,7 @@ Decided once, with numbers checked. Not reopened without a reason.
 |---|---|---|
 | AWS region us-west-2 | us-east-1 | Bedrock rerank and AgentCore both live there |
 | Bedrock managed Knowledge Base for retrieval | OpenSearch + our own chunk/embed pipeline | hybrid search, reranker, parser and web crawler built in; no servers; pennies at our size |
-| Bedrock GraphRAG on Neptune Analytics, stopped when idle, deleted after the demo | Neo4j + our own extraction | AWS-native and quick to set up; $0.48 an hour running (16 m-NCU), about $0.05 stopped |
+| Bedrock GraphRAG on Neptune Analytics, stopped when idle, deleted 2026-09-29 | Neo4j + our own extraction | AWS-native and quick to set up; $0.48 an hour running (16 m-NCU), about $0.05 stopped |
 | No NAT Gateway | private subnets + NAT | $32 a month for nothing we need |
 | No Redis | Redis for rate limits | one server process; a counter in memory would be enough |
 | No login, single user | Cognito + per-tenant search filter | finish the product end to end first; the tenant label code stays as a stub |

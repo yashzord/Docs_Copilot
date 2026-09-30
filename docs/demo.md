@@ -20,6 +20,8 @@ backend, **Terminal 3** for the page.
 
 ## 45 minutes before
 
+> **The graph was deleted on 2026-09-29.** Stopped, it still cost about 4.8 cents an hour, which is roughly $35 a month, and it had run idle since the demo. Relationship questions now fail until a new graph and Knowledge Base are created and the documents are synced again.
+
 | Step | Run or click | You should see |
 |---|---|---|
 | 0. Use the login branch (Terminal 1, once) | `cd ~/Projects/personal/Docs_Copilot && git switch feat/login-runtime-agent && cp -n backend/.env backend/.env.main && cp backend/.env.branch backend/.env` | `Switched to branch 'feat/login-runtime-agent'`. The first copy keeps main's settings safe as `backend/.env.main` |

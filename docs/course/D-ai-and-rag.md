@@ -787,6 +787,9 @@ Change data capture or event-driven: index each page as it changes. A nightly ba
 
 ## 15. GraphRAG: the knowledge graph, and the cost clock
 
+
+> **The graph was deleted on 2026-09-29.** Stopped, it still cost about 4.8 cents an hour, which is roughly $35 a month, and it had run idle since the demo. Relationship questions now fail until a new graph and Knowledge Base are created and the documents are synced again.
+
 **Where we are.** Lessons 13 and 14 built chunk search: find the passages closest to a question. This lesson adds a map of how the things in those passages connect, for questions no single passage answers.
 
 ### The problem
